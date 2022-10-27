@@ -49,6 +49,8 @@ struct prip_hash_list prip_hash[PRIP_HASHSZ];
  struct proc_dir_entry * dir_prip;
  struct proc_dir_entry * prip_config_entry;
  struct proc_dir_entry *prip_status_entry;
+ struct proc_dir_entry *prip_alarm_entry;
+
 static char config_buff[BUFF_SIZE];
 static u32 jhash_prip_initval __read_mostly;
  unsigned long prip_reboot;
@@ -541,15 +543,66 @@ printk("net_one_ip =[%d]two_ip[%d]\n",net_one_ip,net_two_ip);
     return len;
 }
 
+static ssize_t write_prip_alarm( struct file *file,const char __user * buffer,size_t len, loff_t *f_pos)
+{
+    int val=0;
+    char cache[128];
+    char c;
+    int space_flag=0;
+    int base=10;
+    char *p=cache;
+    if(len > 128)
+        return -EINVAL;
+    //get_user(val,(int __user *)buffer);
+    if(copy_from_user(cache,buffer,len))
+        return -EINVAL;
+    do{
+        c=*p;
+        switch(c){
+            case '0':case '1':case '2':case '3':case '4':
+            case '5':case '6':case '7':case '8':case '9':
+                val=val*base + (c - '0');
+                space_flag=1;
+                break;
+            case ' ':
+                if(space_flag)
+                    *p='\0';
+                break;
+            case '\n':
+                *p='\0';
+                break;
+            default:
+                return -EINVAL;
+        }
+    }while(*p++);
+    if(val > 0)
+        atomic_set(&prip_alarm,val);
+    else
+        return -EINVAL;
+    return len;
+}
+
+
 static int read_prip_config(struct seq_file *seq,void *v)
 {
 	seq_printf(seq,"%s",config_buff);
 	return 0;
 }
 
+static int read_prip_alarm(struct seq_file *seq,void *v)
+{
+	seq_printf(seq,"%d\n",atomic_read(&prip_alarm));
+	return 0;
+}
+
 static int seq_open_prip_config(struct inode *inode, struct file *file)
 {
 	return single_open(file,read_prip_config,inode->i_private);
+}
+
+static int seq_open_prip_alarm(struct inode *inode, struct file *file)
+{
+	return single_open(file,read_prip_alarm,inode->i_private);
 }
 
 static struct file_operations prip_config_ops = {
@@ -559,6 +612,13 @@ static struct file_operations prip_config_ops = {
 	.write	= 	write_prip_config,
 	.owner	=	THIS_MODULE,
 	.release	=	single_release,
+};
+
+static struct file_operations prip_alarm_ops = {
+	.open	=	seq_open_prip_alarm,
+	.read	=	seq_read,
+	.write	= 	write_prip_alarm,
+	.owner	=	THIS_MODULE,
 };
 
 int set_prip_mode(struct sock * sk,int mode)
@@ -803,8 +863,17 @@ static int __init init_prip(void)
         goto err_3;
     }
 
+    prip_alarm_entry = proc_create("prip_alarm",S_IRUGO|S_IWUSR,dir_prip, &prip_alarm_ops);
+    if(!prip_alarm_entry){
+        printk("PRIP ERROR: Cannot create /proc/prip/prip_alarm .\n");
+        err = -1;
+        goto err_4;
+    }
+
     printk("PRIP modules insmod success.\n");
     return 0;
+
+err_4:
 
     remove_proc_entry("prip_state",dir_prip);
 err_3:
@@ -815,6 +884,7 @@ err_1:
 }
 static void __exit exit_prip(void){
 
+    remove_proc_entry("prip_alarm",dir_prip);
     remove_proc_entry("prip_state",dir_prip);
     remove_proc_entry("prip_config",dir_prip);
     remove_proc_entry("prip",NULL);
