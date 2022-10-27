@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Generated files
+#
+config_data.h
+config_data.gz
+timeconst.h
+hz.bc
