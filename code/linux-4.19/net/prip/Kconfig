@@ -1,0 +1,11 @@
+#
+# PRIP
+##
+
+config PRIP
+    bool "Parallel Redundancy Internet Protocol"
+    depends on PROC_FS
+    default y
+    ---help---
+        Parallel Redundancy Internet Protocol.
+
