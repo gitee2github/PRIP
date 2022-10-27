@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-only
+sizes.h
+vmlinux
+vmlinux.lds
+vmlinux.scr.lds
+vmlinux.bin.full

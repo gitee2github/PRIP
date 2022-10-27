@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
+*.gen.S
+*.fw
+*.bin
+*.csp
+*.dsp
+ihex2fw
