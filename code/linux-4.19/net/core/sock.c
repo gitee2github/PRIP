@@ -142,6 +142,9 @@
 
 #include <net/tcp.h>
 #include <net/busy_poll.h>
+#ifdef CONFIG_PRIP
+#include <net/prip.h>
+#endif
 
 static DEFINE_MUTEX(proto_list_mutex);
 static LIST_HEAD(proto_list);
@@ -1603,6 +1606,17 @@ static void __sk_free(struct sock *sk)
 	if (likely(sk->sk_net_refcnt))
 		sock_inuse_add(sock_net(sk), -1);
 
+#ifdef CONFIG_PRIP
+	if (sk->prip_set) {
+		set_prip_mode(sk, 0);
+		sk->prip_set = false;
+	}
+	if (sk->priv) {
+		prip_priv_put(sk->priv);
+		sk->priv = NULL;
+	}
+#endif
+
 	if (unlikely(sk->sk_net_refcnt && sock_diag_has_destroy_listeners(sk)))
 		sock_diag_broadcast_destroy(sk);
 	else
@@ -1933,7 +1947,18 @@ EXPORT_SYMBOL(sock_i_ino);
 struct sk_buff *sock_wmalloc(struct sock *sk, unsigned long size, int force,
 			     gfp_t priority)
 {
+
+#ifdef CONFIG_PRIP
+	int count;
+	if(sk->prip_set) 
+		count = sk->sk_sndbuf * 2;
+	else
+		count = sk->sk_sndbuf;
+	if (force || refcount_read(&sk->sk_wmem_alloc) < count ) {
+#else
+
 	if (force || refcount_read(&sk->sk_wmem_alloc) < sk->sk_sndbuf) {
+#endif
 		struct sk_buff *skb = alloc_skb(size, priority);
 		if (skb) {
 			skb_set_owner_w(skb, sk);
@@ -2059,6 +2084,9 @@ struct sk_buff *sock_alloc_send_pskb(struct sock *sk, unsigned long header_len,
 	struct sk_buff *skb;
 	long timeo;
 	int err;
+#ifdef CONFIG_PRIP
+	int count;
+#endif
 
 	timeo = sock_sndtimeo(sk, noblock);
 	for (;;) {
@@ -2070,8 +2098,16 @@ struct sk_buff *sock_alloc_send_pskb(struct sock *sk, unsigned long header_len,
 		if (sk->sk_shutdown & SEND_SHUTDOWN)
 			goto failure;
 
+#ifdef CONFIG_PRIP
+		if(sk->prip_set) 
+			count = sk->sk_sndbuf * 2;
+		else
+			count = sk->sk_sndbuf;
+		if (sk_wmem_alloc_get(sk) < count) 
+#else
 		if (sk_wmem_alloc_get(sk) < sk->sk_sndbuf)
-			break;
+#endif
+		break;
 
 		sk_set_bit(SOCKWQ_ASYNC_NOSPACE, sk);
 		set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
