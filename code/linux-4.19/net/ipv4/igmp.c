@@ -107,6 +107,9 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #endif
+#ifdef CONFIG_PRIP
+#include <net/prip.h>
+#endif
 
 #ifdef CONFIG_IP_MULTICAST
 /* Parameter names and values are taken from igmp-v2-06 draft */
@@ -2178,6 +2181,12 @@ static int __ip_mc_join_group(struct sock *sk, struct ip_mreqn *imr,
 	int count = 0;
 	int err;
 
+#ifdef CONFIG_PRIP
+	struct in_device *dupin_dev = NULL;
+	struct net_device *dupdev;
+	__be32 dupdaddr = 0;
+#endif
+
 	ASSERT_RTNL();
 
 	if (!ipv4_is_multicast(addr))
@@ -2201,6 +2210,34 @@ static int __ip_mc_join_group(struct sock *sk, struct ip_mreqn *imr,
 	err = -ENOBUFS;
 	if (count >= net->ipv4.sysctl_igmp_max_memberships)
 		goto done;
+
+#ifdef CONFIG_PRIP
+	if (sk->prip_set) {
+		if (!in_dev->ifa_list || in_dev->ifa_list->ifa_address == 0) {
+			err = -ENODEV;
+			goto done;
+		}
+		dupdaddr = master_to_slave(in_dev->ifa_list->ifa_address);
+		if (!dupdaddr) {
+			err = -ENODEV;
+			goto done;
+		}
+
+		dupdev = ip_dev_find(net, dupdaddr);
+		if (!dupdev) {
+			err = -ENODEV;
+			goto done;
+		}
+
+		dev_put(dupdev);
+		dupin_dev = __in_dev_get_rtnl(dupdev);
+		if (!dupin_dev) {
+			err = -ENODEV;
+			goto done;
+		}
+	}
+#endif
+
 	iml = sock_kmalloc(sk, sizeof(*iml), GFP_KERNEL);
 	if (!iml)
 		goto done;
@@ -2211,6 +2248,12 @@ static int __ip_mc_join_group(struct sock *sk, struct ip_mreqn *imr,
 	iml->sfmode = mode;
 	rcu_assign_pointer(inet->mc_list, iml);
 	__ip_mc_inc_group(in_dev, addr, mode);
+
+#ifdef CONFIG_PRIP
+	if (dupin_dev)
+		ip_mc_inc_group(dupin_dev, addr);
+#endif
+
 	err = 0;
 done:
 	return err;
@@ -2263,6 +2306,12 @@ int ip_mc_leave_group(struct sock *sk, struct ip_mreqn *imr)
 	u32 ifindex;
 	int ret = -EADDRNOTAVAIL;
 
+#ifdef CONFIG_PRIP
+	struct in_device *dupin_dev = NULL;
+	struct net_device *dupdev;
+	__be32 dupdaddr = 0;
+#endif
+
 	ASSERT_RTNL();
 
 	in_dev = ip_mc_find_dev(net, imr);
@@ -2287,9 +2336,34 @@ int ip_mc_leave_group(struct sock *sk, struct ip_mreqn *imr)
 
 		*imlp = iml->next_rcu;
 
-		if (in_dev)
+		if (in_dev) {
 			ip_mc_dec_group(in_dev, group);
 
+#ifdef CONFIG_PRIP
+			if (sk->prip_set) {
+				if (!in_dev->ifa_list || in_dev->ifa_list->ifa_address == 0) 
+					goto done_all;
+
+				dupdaddr = master_to_slave(in_dev->ifa_list->ifa_address);
+				if (!dupdaddr)
+					goto done_all;
+
+				dupdev = ip_dev_find(net, dupdaddr);
+				if (!dupdev)
+					goto done_all;
+
+				dupin_dev = __in_dev_get_rtnl(dupdev);
+				if (!dupin_dev) 
+					goto done_all;
+
+				ip_mc_dec_group(dupin_dev, group);
+			}
+#endif
+		}
+
+#ifdef CONFIG_PRIP
+done_all:
+#endif
 		/* decrease mem now to avoid the memleak warning */
 		atomic_sub(sizeof(*iml), &sk->sk_omem_alloc);
 		kfree_rcu(iml, rcu);
