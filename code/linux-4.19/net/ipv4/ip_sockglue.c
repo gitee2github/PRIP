@@ -48,7 +48,9 @@
 #include <linux/uaccess.h>
 
 #include <linux/bpfilter.h>
-
+#ifdef CONFIG_PRIP
+#include <net/prip.h>
+#endif
 /*
  *	SOL_IP control messages.
  */
@@ -594,6 +596,9 @@ static int do_ip_setsockopt(struct sock *sk, int level,
 	struct net *net = sock_net(sk);
 	int val = 0, err;
 	bool needs_rtnl = setsockopt_needs_rtnl(optname);
+#ifdef CONFIG_PRIP
+	unsigned char prip = '\0';
+#endif
 
 	switch (optname) {
 	case IP_PKTINFO:
@@ -651,10 +656,35 @@ static int do_ip_setsockopt(struct sock *sk, int level,
 
 		if (optlen > 40)
 			goto e_inval;
+
+#ifdef CONFIG_PRIP
+		if (inet->inet_opt)
+			prip = inet->inet_opt->opt.prip;
+#endif
+
 		err = ip_options_get_from_user(sock_net(sk), &opt,
 					       optval, optlen);
 		if (err)
 			break;
+
+#ifdef CONFIG_PRIP
+		if (opt->opt.prip) {
+			char *pointer = opt->opt.__data;
+			memset(pointer+opt->opt.prip+pointer[opt->opt.prip+2-sizeof(struct iphdr)]+sizeof(unsigned long)+sizeof(__be16)-1-sizeof(struct iphdr), 0, 1);
+		}
+		if (opt->opt.prip && !prip && set_prip_mode(sk, 1)) {
+			opt->opt.prip = 1;
+			err = -EINVAL;
+		}
+		else
+		{
+			sk->prip_set = true;
+		}
+		if (prip > 1 && (!opt->opt.prip)) {
+			set_prip_mode(sk, 0);
+			sk->prip_set = false;
+		}
+#endif
 		old = rcu_dereference_protected(inet->inet_opt,
 						lockdep_sock_is_held(sk));
 		if (inet->is_icsk) {
@@ -1339,10 +1369,18 @@ static int do_ip_getsockopt(struct sock *sk, int level, int optname,
 		inet_opt = rcu_dereference_protected(inet->inet_opt,
 						     lockdep_sock_is_held(sk));
 		opt->optlen = 0;
+
+#ifdef CONFIG_PRIP
+		if (inet->inet_opt && inet->inet_opt->opt.prip && sock_net(sk)->ipv4.sysctl_prip_set) 
+			goto noopt;
+#endif
 		if (inet_opt)
 			memcpy(optbuf, &inet_opt->opt,
 			       sizeof(struct ip_options) +
 			       inet_opt->opt.optlen);
+#ifdef CONFIG_PRIP
+noopt:
+#endif
 		release_sock(sk);
 
 		if (opt->optlen == 0)
