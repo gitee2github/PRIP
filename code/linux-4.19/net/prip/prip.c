@@ -41,15 +41,16 @@
 #define BUFF_SIZE 1024
 
 struct prip_hash_list prip_hash[PRIP_HASHSZ];
- PRIP_CONFIG_T prip_config;
- atomic_t prip_alarm;
- atomic_t prip_cache_timeout;
- atomic_t prip_netmask;
- EXPORT_SYMBOL(prip_netmask);
- struct proc_dir_entry * dir_prip;
- struct proc_dir_entry * prip_config_entry;
- struct proc_dir_entry *prip_status_entry;
- struct proc_dir_entry *prip_alarm_entry;
+PRIP_CONFIG_T prip_config;
+atomic_t prip_alarm;
+atomic_t prip_cache_timeout;
+atomic_t prip_netmask;
+EXPORT_SYMBOL(prip_netmask);
+struct proc_dir_entry * dir_prip;
+struct proc_dir_entry * prip_config_entry;
+struct proc_dir_entry *prip_status_entry;
+struct proc_dir_entry *prip_alarm_entry;
+struct proc_dir_entry * prip_cache_timeout_entry;
 
 static char config_buff[BUFF_SIZE];
 static u32 jhash_prip_initval __read_mostly;
@@ -408,6 +409,59 @@ struct prip_priv * prip_priv_only_find(__u32 localip, __u32 peerip){
 }
 EXPORT_SYMBOL(prip_priv_only_find);
 
+static int get_config_ip(const char * config,char ip[3][16]){
+    int i;
+    int j= 0;
+    int k=0;
+    int len;
+    int flag=0;
+    unsigned char c;
+    if(config == NULL || ip ==NULL)
+        return 0;
+    len=strlen(config);
+    for(i=0;i<(len+1);i++){
+        c = *(config+i);
+        switch(c){
+            case ' ':
+                if(flag){
+                    if ((j==2) && (k <16)){
+                        ip[j][k]='\0';
+                        return 1;
+                    }
+                    if(j >2 || k > 15)
+                        return 0; 
+                    ip[j][k]='\0';
+                    j++;
+                    k=0;
+                    flag = 0;
+                }
+                break;
+            case '0': case '1': 
+            case '2': case '3':
+            case '4': case '5':
+            case '6': case '7':
+            case '8':case '9':
+            case '.':
+                flag = 1;
+                if(k > 15 || j >2)
+                    return 0;
+                ip[j][k] = c;
+                k++;
+                break;
+            case '\n':
+            case '\0':
+                if((j==2)&&(k<16)){
+                    ip[j][k] = '\0';
+                    return 1;
+                }else
+                    return 0;
+            default:
+                return 0;
+        }
+    }
+    return 1;
+}
+
 static ssize_t write_prip_config( struct file *file,const char __user * buffer,size_t len, loff_t *f_pos) 
 {
     char data[BUFF_SIZE];
@@ -582,6 +636,44 @@ static ssize_t write_prip_alarm( struct file *file,const char __user * buffer,si
     return len;
 }
 
+static ssize_t write_prip_cache_timeout( struct file *file,const char __user * buffer,size_t len, loff_t *f_pos)
+{
+    int val=0;
+    char cache[128];
+    char c;
+    int space_flag=0;
+    int base=10;
+    char *p=cache;
+    if(len > 128)
+        return -EINVAL;
+    //get_user(val,(int __user *)buffer);
+    if(copy_from_user(cache,buffer,len))
+        return -EINVAL;
+    do{
+        c=*p;
+        switch(c){
+            case '0':case '1':case '2':case '3':case '4':
+            case '5':case '6':case '7':case '8':case '9':
+                val=val*base + (c - '0');
+                space_flag=1;
+                break;
+            case ' ':
+                if(space_flag)
+                    *p='\0';
+                break;
+            case '\n':
+                *p='\0';
+                break;
+            default:
+                return -EINVAL;
+        }
+    }while(*p++);
+    if(val > 0)
+        atomic_set(&prip_cache_timeout,val);
+    else
+        return -EINVAL;
+    return len;
+}
 
 static int read_prip_config(struct seq_file *seq,void *v)
 {
@@ -594,6 +686,11 @@ static int read_prip_alarm(struct seq_file *seq,void *v)
 	seq_printf(seq,"%d\n",atomic_read(&prip_alarm));
 	return 0;
 }
+static int read_prip_cache_timeout(struct seq_file *seq,void *v)
+{
+	seq_printf(seq,"%d\n",atomic_read(&prip_cache_timeout));
+	return 0;
+}
 
 static int seq_open_prip_config(struct inode *inode, struct file *file)
 {
@@ -604,6 +701,12 @@ static int seq_open_prip_alarm(struct inode *inode, struct file *file)
 {
 	return single_open(file,read_prip_alarm,inode->i_private);
 }
+
+static int seq_open_prip_cache_timeout(struct inode *inode, struct file *file)
+{
+	return single_open(file,read_prip_cache_timeout,inode->i_private);
+}
+
 
 static struct file_operations prip_config_ops = {
 	.open	=	seq_open_prip_config,
@@ -618,6 +721,13 @@ static struct file_operations prip_alarm_ops = {
 	.open	=	seq_open_prip_alarm,
 	.read	=	seq_read,
 	.write	= 	write_prip_alarm,
+	.owner	=	THIS_MODULE,
+};
+
+static struct file_operations prip_cache_timeout_ops = {
+	.open	=	seq_open_prip_cache_timeout,
+	.read	=	seq_read,
+	.write	= 	write_prip_cache_timeout,
 	.owner	=	THIS_MODULE,
 };
 
@@ -870,9 +980,18 @@ static int __init init_prip(void)
         goto err_4;
     }
 
+    prip_cache_timeout_entry = proc_create("prip_cache_timeout",S_IRUGO|S_IWUSR,dir_prip,&prip_cache_timeout_ops);
+    if(!prip_cache_timeout_entry) {
+        printk("PRIP ERROR: Cannot create /proc/prip/prip_cache_timeout .\n");
+        err = -1;
+        goto err_5;
+    }
+
     printk("PRIP modules insmod success.\n");
     return 0;
 
+err_5:
+    remove_proc_entry("prip_alarm",dir_prip);
 err_4:
 
     remove_proc_entry("prip_state",dir_prip);
@@ -883,13 +1002,14 @@ err_2:
 err_1:
 }
 static void __exit exit_prip(void){
-
+    remove_proc_entry("prip_cache_timeout",dir_prip);
     remove_proc_entry("prip_alarm",dir_prip);
     remove_proc_entry("prip_state",dir_prip);
     remove_proc_entry("prip_config",dir_prip);
     remove_proc_entry("prip",NULL);
     return;
 }
+
 MODULE_LICENSE("GPL");
 MODULE_VERSION("1.0");
 
