@@ -400,6 +400,13 @@ struct sock {
 		struct socket_wq __rcu	*sk_wq;
 		struct socket_wq	*sk_wq_raw;
 	};
+
+#ifdef CONFIG_PRIP
+	struct dst_entry    *sk_dup_dst_cache;
+	struct prip_priv *priv;
+	bool prip_set;
+#endif
+
 #ifdef CONFIG_XFRM
 	struct xfrm_policy __rcu *sk_policy[2];
 #endif

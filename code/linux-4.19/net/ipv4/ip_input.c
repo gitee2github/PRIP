@@ -148,6 +148,10 @@
 #include <linux/netlink.h>
 #include <net/dst_metadata.h>
 
+#ifdef CONFIG_PRIP
+#include <net/prip.h>
+#endif
+
 /*
  *	Process Router Attention IP option (RFC 2113)
  */
@@ -246,12 +250,86 @@ int ip_local_deliver(struct sk_buff *skb)
 	/*
 	 *	Reassemble IP fragments.
 	 */
+#ifdef CONFIG_PRIP
+	struct ip_options *opt;
+	unsigned char isdup;
+	struct iphdr *iph;
+	unsigned char *pointer = NULL;
+	unsigned long start;
+	u16 seq;
+	struct prip_priv *priv = NULL;
+	__be32 daddr = 0;
+#endif
+
 	struct net *net = dev_net(skb->dev);
 
 	if (ip_is_fragment(ip_hdr(skb))) {
 		if (ip_defrag(net, skb, IP_DEFRAG_LOCAL_DELIVER))
 			return 0;
 	}
+
+#ifdef CONFIG_PRIP
+	opt = &(IPCB(skb)->opt);
+	if (opt && opt->prip) {
+		iph = ip_hdr(skb);
+		pointer = (unsigned char *)iph;
+		if (iph->protocol != IPPROTO_TCP && iph->protocol != IPPROTO_UDP) {
+			memset(opt->__data+opt->prip-sizeof(struct iphdr), IPOPT_NOP, 14);
+			opt->prip = 0;
+			goto invalid_rcv;
+		}
+		memcpy(&start, pointer+opt->prip+pointer[opt->prip+2]-1, sizeof(unsigned long));
+		memcpy(&seq, pointer+opt->prip+pointer[opt->prip+2]+sizeof(unsigned long)-1, sizeof(__u16));
+		memcpy(&isdup, pointer+opt->prip+pointer[opt->prip+2]+sizeof(unsigned long)+sizeof(__u16)-1, sizeof(unsigned char));
+		memset(pointer+opt->prip+pointer[opt->prip+2]+sizeof(unsigned long)+sizeof(__u16)-1, 0, sizeof(unsigned char));
+
+		read_lock_bh(&prip_config.rwlock);
+		if(prip_config.valid <= 0){
+			read_unlock_bh(&prip_config.rwlock);
+			if(isdup){
+				kfree_skb(skb);
+				return 0;
+			}
+			goto invalid_rcv;
+		}
+		read_unlock_bh(&prip_config.rwlock);
+
+		if(!isdup){
+			priv = prip_priv_find(iph->daddr, iph->saddr);
+		}else {
+			daddr = slave_to_master(iph->daddr);
+			iph->saddr = slave_to_master(iph->saddr);
+			if(daddr)
+				priv = prip_priv_find(daddr, iph->saddr);
+		}
+		
+		if(!isdup){
+			if(priv){
+				master_recv_inc(priv);
+			}else{
+				kfree_skb(skb);
+				return 0;
+			}
+		}
+		if(isdup){
+			if(priv){
+				slave_recv_inc(priv);
+				iph->daddr = daddr;
+			}else{
+				kfree_skb(skb);
+				return 0;
+			}
+		}
+
+		if(prip_check(ntohs(seq),isdup,priv,be64_to_cpu(start))) {
+			kfree_skb(skb);
+			prip_priv_put(priv);
+			return 0;
+		}
+		prip_priv_put(priv);
+	}
+invalid_rcv:
+#endif
 
 	return NF_HOOK(NFPROTO_IPV4, NF_INET_LOCAL_IN,
 		       net, NULL, skb, skb->dev, NULL,

@@ -111,6 +111,10 @@ struct netns_ipv4 {
 	int sysctl_tcp_early_demux;
 	int sysctl_udp_early_demux;
 
+	#ifdef CONFIG_PRIP
+	int sysctl_prip_set;                                                 
+	#endif
+
 	int sysctl_fwmark_reflect;
 	int sysctl_tcp_fwmark_accept;
 #ifdef CONFIG_NET_L3_MASTER_DEV
