@@ -122,7 +122,10 @@
 #include <net/l3mdev.h>
 
 #include <trace/events/sock.h>
-
+#ifdef CONFIG_PRIP
+#include <net/prip.h>
+#include <net/transp_v6.h>
+#endif
 /* The inetsw table contains everything that inet_create needs to
  * build a new socket.
  */
@@ -158,6 +161,9 @@ void inet_sock_destruct(struct sock *sk)
 	kfree(rcu_dereference_protected(inet->inet_opt, 1));
 	dst_release(rcu_dereference_check(sk->sk_dst_cache, 1));
 	dst_release(sk->sk_rx_dst);
+#ifdef CONFIG_PRIP
+	dst_release(sk->sk_dup_dst_cache);
+#endif
 	sk_refcnt_debug_dec(sk);
 }
 EXPORT_SYMBOL(inet_sock_destruct);
@@ -254,6 +260,11 @@ static int inet_create(struct net *net, struct socket *sock, int protocol,
 	unsigned char answer_flags;
 	int try_loading_module = 0;
 	int err;
+#ifdef CONFIG_PRIP
+	unsigned char options[16] = { 0 };
+	struct ip_options_rcu *opt = NULL;
+	char prip = 0;
+#endif
 
 	if (protocol < 0 || protocol >= IPPROTO_MAX)
 		return -EINVAL;
@@ -385,6 +396,34 @@ lookup_protocol:
 			goto out;
 		}
 	}
+
+#ifdef CONFIG_PRIP
+	if ((!err) && sk && (sk->sk_protocol == IPPROTO_TCP || sk->sk_protocol == IPPROTO_UDP)) {
+		if (sock_net(sk)->ipv4.sysctl_prip_set) {
+			read_lock_bh(&prip_config.rwlock);
+			if (prip_config.valid > 0){ //lcw
+				read_unlock_bh(&prip_config.rwlock);
+				options[0] = 18;
+				options[1] = 16;
+				options[2] = 4;
+				if (ip_options_get_from_prip(sock_net(sk), &opt, options, sizeof(options)))
+					goto out;
+				if (opt->opt.prip && !prip && set_prip_mode(sk, 1)) {
+					kfree(opt);
+					err = -EAFNOSUPPORT;
+					goto out;
+				} 
+				else
+					sk->prip_set = true;
+
+				opt = xchg(&inet_sk(sk)->inet_opt, opt);
+				kfree(opt);
+			}
+			else
+				read_unlock_bh(&prip_config.rwlock);
+		}
+	}
+#endif
 
 	if (!kern) {
 		err = BPF_CGROUP_RUN_PROG_INET_SOCK(sk);
