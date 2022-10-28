@@ -20,6 +20,9 @@
 #include <net/route.h>
 #include <net/tcp_states.h>
 #include <net/sock_reuseport.h>
+#ifdef CONFIG_PRIP
+#include <net/prip.h>
+#endif
 
 int __ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 {
@@ -30,13 +33,28 @@ int __ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len
 	__be32 saddr;
 	int oif;
 	int err;
-
+#ifdef CONFIG_PRIP
+	bool isdup = false;
+	struct ip_options_rcu *inet_opt;
+	int duperr=1;
+#endif
 
 	if (addr_len < sizeof(*usin))
 		return -EINVAL;
 
 	if (usin->sin_family != AF_INET)
 		return -EAFNOSUPPORT;
+
+#ifdef CONFIG_PRIP
+	rcu_read_lock();
+	inet_opt = rcu_dereference(inet->inet_opt);
+	if (inet_opt && inet_opt->opt.prip == 1) {
+		err = -ENETUNREACH;
+		IP_INC_STATS(sock_net(sk), IPSTATS_MIB_OUTNOROUTES);
+		rcu_read_unlock();
+		return err;
+	}
+#endif
 
 	sk_dst_reset(sk);
 
@@ -55,16 +73,86 @@ int __ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len
 			      inet->inet_sport, usin->sin_port, sk);
 	if (IS_ERR(rt)) {
 		err = PTR_ERR(rt);
+
+#ifdef CONFIG_PRIP
+re_route:
+		if (inet_opt && inet_opt->opt.prip) {
+			__u32 dupdaddr = master_to_slave(usin->sin_addr.s_addr);
+			saddr = master_to_slave(saddr);
+			if (dupdaddr) {
+				rt = ip_route_connect(fl4, dupdaddr, saddr,RT_CONN_FLAGS(sk), 0,sk->sk_protocol,inet->inet_sport, usin->sin_port, sk);
+				if(!IS_ERR(rt)){
+					if (rt->rt_gateway != dupdaddr) {
+						ip_rt_put(rt);
+						err = -ENETUNREACH;
+					}
+					else{
+						isdup = true;
+						duperr=0;
+						memset(inet_opt->opt.__data+inet_opt->opt.prip+sizeof(unsigned long)+3+sizeof(__be16)-sizeof(struct iphdr), 1, sizeof(unsigned char));
+					}
+				}
+				else{
+					err = PTR_ERR(rt);
+				}
+			}
+		}
+#endif
+
+
 		if (err == -ENETUNREACH)
 			IP_INC_STATS(sock_net(sk), IPSTATS_MIB_OUTNOROUTES);
+#ifdef CONFIG_PRIP
+		if(err&&duperr)
+#endif
 		goto out;
 	}
+	
+#ifdef CONFIG_PRIP
+	else{
+		if (inet_opt && inet_opt->opt.prip) {
+			if(rt->rt_gateway == usin->sin_addr.s_addr) {	//!= change to ==
+				ip_rt_put(rt);
+				err = -ENETUNREACH;
+				goto re_route;
+			}
+			memset(inet_opt->opt.__data+inet_opt->opt.prip+sizeof(unsigned long)+3+sizeof(__be16)-sizeof(struct iphdr), 0, sizeof(unsigned char));
+		}
+	}
+#endif
 
 	if ((rt->rt_flags & RTCF_BROADCAST) && !sock_flag(sk, SOCK_BROADCAST)) {
 		ip_rt_put(rt);
 		err = -EACCES;
 		goto out;
 	}
+
+#ifdef CONFIG_PRIP
+
+	if (isdup) {
+		if (!inet->inet_saddr)
+			inet->inet_saddr = slave_to_master(fl4->saddr);
+		if (!inet->inet_rcv_saddr) {
+			inet->inet_rcv_saddr = inet->inet_saddr;
+			if (sk->sk_prot->rehash)
+				sk->sk_prot->rehash(sk);
+		}
+		inet->inet_daddr = slave_to_master(fl4->daddr);
+	}
+	else {
+		if (!inet->inet_saddr)
+			inet->inet_saddr = fl4->saddr;/* Update source address */
+		if (!inet->inet_rcv_saddr) {
+			inet->inet_rcv_saddr = fl4->saddr;
+			if (sk->sk_prot->rehash)
+				sk->sk_prot->rehash(sk);
+		}
+		inet->inet_daddr = fl4->daddr;
+	}
+
+#else
+
+
 	if (!inet->inet_saddr)
 		inet->inet_saddr = fl4->saddr;	/* Update source address */
 	if (!inet->inet_rcv_saddr) {
@@ -73,6 +161,8 @@ int __ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len
 			sk->sk_prot->rehash(sk);
 	}
 	inet->inet_daddr = fl4->daddr;
+#endif
+
 	inet->inet_dport = usin->sin_port;
 	reuseport_has_conns(sk, true);
 	sk->sk_state = TCP_ESTABLISHED;
@@ -82,6 +172,10 @@ int __ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len
 	sk_dst_set(sk, &rt->dst);
 	err = 0;
 out:
+
+#ifdef CONFIG_PRIP
+	rcu_read_unlock();
+#endif
 	return err;
 }
 EXPORT_SYMBOL(__ip4_datagram_connect);
