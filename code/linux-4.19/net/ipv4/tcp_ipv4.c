@@ -86,6 +86,10 @@
 #include <linux/scatterlist.h>
 
 #include <trace/events/tcp.h>
+#ifdef  CONFIG_PRIP
+#include <net/prip.h>
+#include <net/netns/ipv4.h>
+#endif
 
 #ifdef CONFIG_TCP_MD5SIG
 static int tcp_v4_md5_hash_hdr(char *md5_hash, const struct tcp_md5sig_key *key,
@@ -183,6 +187,188 @@ int tcp_twsk_unique(struct sock *sk, struct sock *sktw, void *twp)
 }
 EXPORT_SYMBOL_GPL(tcp_twsk_unique);
 
+#ifdef CONFIG_PRIP
+int tcp_v4_connect_prip(struct sock *sk, struct sockaddr *uaddr, int addr_len)
+{
+	struct sockaddr_in *usin = (struct sockaddr_in *)uaddr;
+	struct inet_sock *inet = inet_sk(sk);
+	struct tcp_sock *tp = tcp_sk(sk);
+	__be16 orig_sport, orig_dport;
+	__be32 daddr, nexthop, dupdaddr;
+	struct flowi4 *fl4;
+	struct rtable *rt = NULL;
+	struct rtable *duprt = NULL;
+	struct rtable *tmprt = NULL;
+	int err=0;
+	int duperr = 0;
+	struct ip_options_rcu *inet_opt;
+	struct inet_timewait_death_row *tcp_death_row = &sock_net(sk)->ipv4.tcp_death_row;
+
+	nexthop = daddr = usin->sin_addr.s_addr;
+
+	inet_opt = rcu_dereference_protected(inet->inet_opt, lockdep_sock_is_held(sk));
+	if (inet_opt && inet_opt->opt.srr) {
+		if (!daddr)
+			return -EINVAL;
+		
+		nexthop = inet_opt->opt.faddr;
+	}
+
+	dupdaddr = master_to_slave(daddr);
+	if(!dupdaddr)
+	{
+		return -ENETUNREACH;
+	}
+
+	orig_sport = inet->inet_sport;
+	orig_dport = usin->sin_port;
+	fl4 = &inet->cork.fl.u.ip4;
+
+	rt = ip_route_connect(fl4, nexthop, inet->inet_saddr,
+			      RT_CONN_FLAGS(sk), sk->sk_bound_dev_if,
+			      IPPROTO_TCP,
+			      orig_sport, orig_dport, sk);
+	if (!IS_ERR(rt)) { //find 
+	/*	if(daddr != rt->rt_gateway) {
+			ip_rt_put(rt);
+			rt = NULL;
+			err = -ENETUNREACH;
+		}*/
+		if (!inet->inet_saddr) 
+			inet->inet_saddr = fl4->saddr;
+	} else {
+		err = PTR_ERR(rt);
+		rt = NULL;
+	}
+
+	duprt = ip_route_connect_prip(fl4,dupdaddr,inet->inet_saddr,
+			      RT_CONN_FLAGS(sk), 0,
+			      IPPROTO_TCP,
+			      orig_sport, orig_dport, sk);
+	if (!IS_ERR(duprt)) { //find 
+	/*	if(dupdaddr != duprt->rt_gateway) {
+			ip_rt_put(duprt);
+			duprt = NULL;
+			duperr = -ENETUNREACH;
+		}*/
+		if (!inet->inet_saddr) 
+			inet->inet_saddr = slave_to_master(fl4->saddr);
+	} else {
+		duperr = PTR_ERR(duprt);
+		duprt = NULL;
+	}
+
+	if ((err == -ENETUNREACH) && (duperr == -ENETUNREACH)) 
+		IP_INC_STATS(sock_net(sk), IPSTATS_MIB_OUTNOROUTES);
+	if ((err < 0) && (duperr < 0)){
+		return err;
+	}	
+	if (rt && rt->rt_flags & (RTCF_MULTICAST | RTCF_BROADCAST)) {
+		ip_rt_put(rt);
+		rt = NULL;
+	}
+		
+	if (duprt && duprt->rt_flags & (RTCF_MULTICAST | RTCF_BROADCAST)) {
+		ip_rt_put(duprt);
+		duprt = NULL;
+	}
+	if(!rt && !duprt){
+		return -ENETUNREACH;
+	}
+
+	sk_rcv_saddr_set(sk, inet->inet_saddr);
+	if (tp->rx_opt.ts_recent_stamp && inet->inet_daddr != daddr) {
+		/* Reset inherited state */
+		tp->rx_opt.ts_recent	   = 0;
+		tp->rx_opt.ts_recent_stamp = 0;
+		if (likely(!tp->repair))
+			tp->write_seq	   = 0;
+	}
+	
+	if(!rt) {
+		tmprt = duprt;
+
+		sk_daddr_set(sk, fl4->daddr);
+	} else {
+		tmprt = rt;
+
+		sk_daddr_set(sk, nexthop);
+	}
+
+	inet->inet_dport = usin->sin_port;
+
+	inet_csk(sk)->icsk_ext_hdr_len = 0;
+	if (inet_opt)
+		inet_csk(sk)->icsk_ext_hdr_len = inet_opt->opt.optlen;
+
+	tp->rx_opt.mss_clamp = TCP_MSS_DEFAULT;
+
+	/* Socket identity is still unknown (sport may be zero).
+	 * However we set state to SYN-SENT and not releasing socket
+	 * lock select source port, enter ourselves into the hash tables and
+	 * complete initialization after this.
+	 */
+	tcp_set_state(sk, TCP_SYN_SENT);
+	err = inet_hash_connect(tcp_death_row, sk);
+	if (err){
+		goto failure;
+	}
+
+	sk_set_txhash(sk);
+
+	if(rt) {
+		rt = ip_route_newports(fl4, rt, orig_sport, orig_dport,
+			       inet->inet_sport, inet->inet_dport, sk);
+		if (IS_ERR(rt)) {
+		    err = PTR_ERR(rt);
+		    rt = NULL;
+			goto failure;
+		}
+	}
+	/* OK, now commit destination to socket.  */
+//	sk->sk_gso_type = SKB_GSO_TCPV4;
+	sk->sk_gso_type = 3;
+	sk_setup_caps(sk, &tmprt->dst);
+
+	if (!tp->write_seq && likely(!tp->repair))
+		tp->write_seq = secure_tcp_seq(inet->inet_saddr,
+					       inet->inet_daddr,
+					       inet->inet_sport,
+					       usin->sin_port);
+	// if (duprt) {
+	// 	struct dst_entry *old_dst;
+	// 	old_dst = sk->sk_dup_dst_cache;
+	// 	if (rt)
+	// 		sk->sk_dup_dst_cache = &duprt->dst;
+	// 	else
+	// 		sk->sk_dup_dst_cache = dst_clone(&duprt->dst);
+	// 	printk("slave  old_dst %d \n", atomic_read(&dst->__refcnt));
+	// 	//dst_release(old_dst);
+	// }
+	inet->inet_id = tp->write_seq ^ jiffies;
+
+	err = tcp_connect(sk);
+
+	rt = NULL;
+	if (err)
+		goto failure;
+	return 0;
+
+failure:
+	/*
+	 * This unhashes the socket and releases the local port,
+	 * if necessary.
+	 */
+	tcp_set_state(sk, TCP_CLOSE);
+	ip_rt_put(tmprt);
+	ip_rt_put(duprt);
+	sk->sk_route_caps = 0;
+	sk->sk_dup_dst_cache = 0;
+	inet->inet_dport = 0;
+	return err;
+}
+#endif
+
 static int tcp_v4_pre_connect(struct sock *sk, struct sockaddr *uaddr,
 			      int addr_len)
 {
@@ -217,6 +403,23 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 
 	if (usin->sin_family != AF_INET)
 		return -EAFNOSUPPORT;
+
+#ifdef CONFIG_PRIP
+	// if (inet->inet_opt && (inet->inet_opt->opt.prip > 1) && (usin->sin_addr.s_addr != htonl(INADDR_LOOPBACK))) 
+	if  ((usin->sin_addr.s_addr != htonl(INADDR_LOOPBACK))) 
+	{
+		if(check_prip_net(usin->sin_addr.s_addr))
+		{
+			goto normal_routine;
+		}
+		err = tcp_v4_connect_prip(sk, uaddr, addr_len);
+		return err;
+	}
+	else if (inet->inet_opt && (inet->inet_opt->opt.prip == 1)){
+		return -ENETUNREACH; 
+	}
+normal_routine:
+#endif
 
 	nexthop = daddr = usin->sin_addr.s_addr;
 	inet_opt = rcu_dereference_protected(inet->inet_opt,
@@ -603,6 +806,11 @@ void tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 	 *							--ANK (980905)
 	 */
 
+#ifdef CONFIG_PRIP
+	if (sk->prip_set)
+		goto out;
+#endif
+
 	inet = inet_sk(sk);
 	if (!sock_owned_by_user(sk) && inet->recverr) {
 		sk->sk_err = err;
@@ -919,6 +1127,196 @@ static void tcp_v4_reqsk_send_ack(const struct sock *sk, struct sk_buff *skb,
 			ip_hdr(skb)->tos);
 }
 
+static inline int ip_select_ttl(struct inet_sock *inet, struct dst_entry *dst)
+{
+	int ttl = inet->uc_ttl;
+
+	if (ttl < 0)
+		ttl = dst_metric(dst, RTAX_HOPLIMIT);
+	return ttl;
+}
+
+
+#ifdef CONFIG_PRIP
+static int tcp_v4_send_synack_prip(const struct sock *sk, struct dst_entry *dst,
+					struct flowi *fl,
+					struct request_sock *req,
+					struct tcp_fastopen_cookie *foc,
+					enum tcp_synack_type synack_type)
+{
+	const struct inet_request_sock *ireq = inet_rsk(req);
+	struct flowi4 fl4;
+	struct sk_buff *skb = NULL;
+	struct sk_buff *dupskb = NULL;
+
+	int err = -1;
+	int err2 = -1;
+
+	__be32 dupdaddr;
+	bool route = true;
+	struct rtable *rt = NULL;
+	struct dst_entry *dupdst = NULL;
+	struct inet_sock *inet = inet_sk(sk);
+	struct iphdr *iph;
+	struct ip_options_rcu *opt = inet_rsk(req)->ireq_opt;
+	struct prip_priv *priv = NULL;
+	struct net *net = NULL;
+	unsigned char *pointer = NULL;
+
+	if(opt->opt.prip == 1){
+		dst_release(dst);			//linx lcw
+		return -EHOSTUNREACH;
+	}
+	dupdaddr = master_to_slave(ireq->ir_rmt_addr);
+	if (!dupdaddr) {
+		dst_release(dst);			//linx lcw
+		return -EHOSTUNREACH;
+	}
+
+	/* First, grab a route. */
+	if (!dst && (dst = inet_csk_route_req(sk, &fl4, req)) == NULL)
+		route = false;
+
+	priv = prip_priv_find(ireq->ir_loc_addr, ireq->ir_rmt_addr);
+	if (!priv) {
+		dst_release(dst);			//linx lcw
+		return -ENOMEM;
+	}
+
+	net = sock_net(sk);
+	rt = ip_route_output_ports(net, &fl4, sk,
+			dupdaddr, 
+			ireq->ir_loc_addr, 
+			ireq->ir_rmt_port, 
+			inet->inet_sport,
+			sk->sk_protocol, RT_CONN_FLAGS(sk), 0);
+	if (IS_ERR(rt)) 
+		IP_INC_STATS(net,IPSTATS_MIB_OUTNOROUTES);
+	else {
+	/*	if(dupdaddr != rt->rt_gateway)
+			iddrp_rt_put(rt);
+		else*/
+			dupdst = &rt->dst;
+	}
+	if(route) {
+		skb = tcp_make_synack(sk, dst, req, foc, synack_type);
+		if (skb) {
+			__tcp_v4_send_check(skb,ireq->ir_loc_addr,ireq->ir_rmt_addr);
+		/*	err = ip_build_and_send_pkt(skb,sk,ireq->ir_loc_addr,
+							ireq->ir_rmt_addr,
+							ireq_opt_deref(ireq)); */
+
+			rt = skb_rtable(skb);
+			/* Build the IP header. */
+			skb_push(skb, sizeof(struct iphdr) + (opt ? opt->opt.optlen : 0));
+			skb_reset_network_header(skb);
+			iph = ip_hdr(skb);
+			iph->version  = 4;
+			iph->ihl      = 5;
+			iph->tos      = inet->tos;
+			iph->ttl      = ip_select_ttl(inet, &rt->dst);
+			iph->daddr    = ireq->ir_rmt_addr;
+			iph->saddr    = ireq->ir_loc_addr;
+			iph->protocol = sk->sk_protocol;
+			if (ip_dont_fragment(sk, &rt->dst)) {
+				iph->frag_off = htons(IP_DF);
+				iph->id = 0;
+			}
+			else {
+				iph->frag_off = 0;
+				ip_select_ident(net, skb, sk);
+			}
+
+			if (opt && opt->opt.optlen) {
+				iph->ihl += opt->opt.optlen>>2;
+				ip_options_build(skb, &opt->opt, iph->daddr, rt, 0);
+			}
+			skb->priority = sk->sk_priority;
+			skb->mark = sk->sk_mark;
+
+			dupskb = skb_copy(skb,GFP_ATOMIC);
+			if(dupskb)
+				skb_set_owner_w(dupskb,sk);
+
+			/* Send it out. */
+			err = ip_local_out(sock_net(sk),skb->sk,skb);
+			err = net_xmit_eval(err);
+		}
+		if(!err)
+			master_send_inc(priv);
+	}
+	if(!dupdst) {
+		if(!route) {
+			prip_priv_put(priv);
+			return -EHOSTUNREACH;
+		}
+		else {
+			prip_priv_put(priv);
+			return err;
+		}
+	}
+	if(!route) 
+		dupskb = tcp_make_synack(sk, dupdst, req, foc, synack_type);
+	if(dupskb) {
+		if(!route) {
+			__tcp_v4_send_check(dupskb,ireq->ir_loc_addr,ireq->ir_rmt_addr);
+			/*struct tcphdr *th = tcp_hdr(dupskb);
+			th->check = tcp_v4_check(dupskb->len,
+				ireq->ir_loc_addr,
+				ireq->ir_rmt_addr,
+				csum_partial(th, dupskb->len, dupskb->csum)); */
+		}else{
+			dst_release(skb_dst(dupskb));			//linx lcw
+			dupskb->_skb_refdst = (unsigned long)(dupdst);
+		}
+		rt = skb_rtable(dupskb);
+		/* Build the IP header. */
+		if (!route) {
+			skb_push(dupskb, sizeof(struct iphdr) + (opt ? opt->opt.optlen : 0));
+			skb_reset_network_header(dupskb);
+		}
+		iph = ip_hdr(dupskb);
+		iph->version  = 4;
+		iph->ihl      = 5;
+		iph->tos      = inet->tos;
+		iph->ttl      = ip_select_ttl(inet, &rt->dst);
+		iph->daddr    = fl4.daddr;
+		iph->saddr    = fl4.saddr;
+		iph->protocol = sk->sk_protocol;
+		if (ip_dont_fragment(sk, &rt->dst)) {
+			iph->frag_off = htons(IP_DF);
+			iph->id = 0;
+		}
+		else {
+			iph->frag_off = 0;
+			ip_select_ident(net, skb, sk);
+		}
+
+		if (opt && opt->opt.optlen) {
+			iph->ihl += opt->opt.optlen>>2;
+			if (!route)
+				ip_options_build(dupskb, &opt->opt, ireq->ir_rmt_addr, rt, 0);
+		}
+		pointer = (unsigned char *)iph;
+		memset(pointer+opt->opt.prip+pointer[opt->opt.prip+2]+sizeof(unsigned long)+sizeof(__be16)-1, 1, 1);
+		dupskb->priority = sk->sk_priority;
+		dupskb->mark = sk->sk_mark;
+		/* Send it out. */
+		err2 = ip_local_out(sock_net(sk),dupskb->sk,dupskb);
+/*		if (!route)
+			dst_release(dupdst); */
+		err2 = net_xmit_eval(err2);
+	}
+	if (!err2) {
+		slave_send_inc(priv);
+		err = err2;
+	}
+	prip_priv_put(priv);
+	return err;
+}
+#endif
+
+
 /*
  *	Send a SYN-ACK after having received a SYN.
  *	This still operates on a request_sock only, not on a big
@@ -934,6 +1332,11 @@ static int tcp_v4_send_synack(const struct sock *sk, struct dst_entry *dst,
 	struct flowi4 fl4;
 	int err = -1;
 	struct sk_buff *skb;
+
+#ifdef CONFIG_PRIP
+	if ((ireq->ireq_opt && ireq->ireq_opt->opt.prip) && (ireq->ir_rmt_addr != htonl(INADDR_LOOPBACK)))
+		return tcp_v4_send_synack_prip(sk, dst, fl, req, foc, synack_type);
+#endif
 
 	/* First, grab a route. */
 	if (!dst && (dst = inet_csk_route_req(sk, &fl4, req)) == NULL)
@@ -1411,15 +1814,52 @@ struct sock *tcp_v4_syn_recv_sock(const struct sock *sk, struct sk_buff *skb,
 #endif
 	struct ip_options_rcu *inet_opt;
 
+#ifdef CONFIG_PRIP
+	struct flowi4 fl4;
+#endif
+
 	if (sk_acceptq_is_full(sk))
 		goto exit_overflow;
+
+#ifdef CONFIG_PRIP
+	if(!dst && (dst = inet_csk_route_req(sk,&fl4,req)) == NULL) {
+		ireq = inet_rsk(req);
+		if(ireq->ireq_opt && ireq->ireq_opt->opt.prip) {
+			struct rtable *rt;
+			__be32 dupdaddr = master_to_slave(inet_rsk(req)->ir_rmt_addr);
+			if(!dupdaddr)
+				goto exit;
+
+			struct net *net = NULL;
+			net = sock_net(sk);
+			rt = ip_route_output_ports(net, &fl4, sk,
+					dupdaddr, 
+					ireq->ir_loc_addr, 
+					ireq->ir_rmt_port, 
+					inet_sk(sk)->inet_sport,
+					sk->sk_protocol, RT_CONN_FLAGS(sk), sk->sk_bound_dev_if);
+			if (IS_ERR(rt)) 
+				goto exit;
+			dst = &rt->dst;
+		} 
+		else
+			goto exit;
+	}
+#endif
+
 
 	newsk = tcp_create_openreq_child(sk, req, skb);
 	if (!newsk)
 		goto exit_nonewsk;
 
+#ifdef CONFIG_PRIP
+	if(inet_rsk(req)->ireq_opt && inet_rsk(req)->ireq_opt->opt.prip)
+		newsk->sk_gso_type  = 3;
+	else
+		newsk->sk_gso_type = SKB_GSO_TCPV4;
+#else
 	newsk->sk_gso_type = SKB_GSO_TCPV4;
-	inet_sk_rx_dst_set(newsk, skb);
+#endif
 
 	newtp		      = tcp_sk(newsk);
 	newinet		      = inet_sk(newsk);
