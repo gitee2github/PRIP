@@ -282,6 +282,9 @@
 #include <linux/uaccess.h>
 #include <asm/ioctls.h>
 #include <net/busy_poll.h>
+#ifdef CONFIG_PRIP
+#include <net/prip.h>
+#endif
 
 struct percpu_counter tcp_orphan_count;
 EXPORT_SYMBOL_GPL(tcp_orphan_count);
@@ -3326,6 +3329,11 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct net *net = sock_net(sk);
 	int val, len;
+#ifdef CONFIG_PRIP
+	struct inet_sock *inet = inet_sk(sk);
+	char state = 0;
+	struct prip_priv *priv;
+#endif
 
 	if (get_user(len, optlen))
 		return -EFAULT;
@@ -3336,6 +3344,38 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		return -EINVAL;
 
 	switch (optname) {
+#ifdef CONFIG_PRIP
+	case TCP_PRIP_LINK_STATE:
+	{
+		memset(&state, 0, sizeof(char));
+		if (inet->inet_rcv_saddr && inet->inet_daddr) {
+			if (inet->inet_opt && (inet->inet_opt->opt.prip > 1) && (inet->inet_opt->opt.optlen > 0)) {
+				priv = prip_priv_only_find(inet->inet_rcv_saddr, inet->inet_daddr);
+				if (priv) {
+					if (atomic_read(&priv->master_status))
+						state = state | 0x08;
+					else
+						state = state | 0x04;
+
+					if (atomic_read(&priv->slave_status))
+						state = state | 0x02;
+					else
+						state = state | 0x01;
+
+					prip_priv_put(priv);
+					if (put_user(sizeof(char), optlen))
+						return -EFAULT;
+					if (copy_to_user(optval, &state, sizeof(char)))
+						return -EFAULT;
+					return 0;
+				}
+			}
+		}
+
+		return -EFAULT;
+	}
+#endif
+
 	case TCP_MAXSEG:
 		val = tp->mss_cache;
 		if (!val && ((1 << sk->sk_state) & (TCPF_CLOSE | TCPF_LISTEN)))

@@ -28,6 +28,9 @@
 #include <net/inet_common.h>
 #include <net/xfrm.h>
 #include <net/busy_poll.h>
+#ifdef CONFIG_PRIP
+#include <net/prip.h>
+#endif
 
 static bool tcp_in_window(u32 seq, u32 end_seq, u32 s_win, u32 e_win)
 {
@@ -788,6 +791,19 @@ struct sock *tcp_check_req(struct sock *sk, struct sk_buff *skb,
 							 req, &own_req);
 	if (!child)
 		goto listen_overflow;
+
+#ifdef CONFIG_PRIP
+	if (inet_sk(child)->inet_opt && inet_sk(child)->inet_opt->opt.prip) {
+		if (set_prip_mode(child, 1)) {
+			child->sk_state = TCP_CLOSE;
+			inet_csk_destroy_sock(child);
+			bh_unlock_sock(child);
+			sock_put(child);
+			goto embryonic_reset;
+		}
+		child->prip_set = true;
+	}
+#endif
 
 	sock_rps_save_rxhash(child, skb);
 	tcp_synack_rtt_meas(child, req);
