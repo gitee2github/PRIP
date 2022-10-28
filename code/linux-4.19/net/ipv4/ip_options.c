@@ -29,6 +29,9 @@
 #include <net/route.h>
 #include <net/cipso_ipv4.h>
 #include <net/ip_fib.h>
+#ifdef CONFIG_PRIP
+#include <net/prip.h>
+#endif
 
 /*
  * Write options to IP header, record destination address to
@@ -46,12 +49,30 @@ void ip_options_build(struct sk_buff *skb, struct ip_options *opt,
 {
 	unsigned char *iph = skb_network_header(skb);
 
+#ifdef CONFIG_PRIP
+	unsigned long tmp_snd_start;
+	unsigned long snd_start;
+#endif
+
 	memcpy(&(IPCB(skb)->opt), opt, sizeof(struct ip_options));
 	memcpy(iph+sizeof(struct iphdr), opt->__data, opt->optlen);
 	opt = &(IPCB(skb)->opt);
 
 	if (opt->srr)
 		memcpy(iph+opt->srr+iph[opt->srr+1]-4, &daddr, 4);
+
+#ifdef CONFIG_PRIP
+	if (opt->prip) {
+		u16 pripid = 0;
+		struct prip_priv* priv = prip_priv_find(((struct iphdr *)iph)->saddr, daddr);
+		pripid = htons(get_pripid(priv, &tmp_snd_start));
+		prip_priv_put(priv);
+		snd_start = cpu_to_be64(tmp_snd_start);
+		memcpy(iph+opt->prip+iph[opt->prip+2]-1, &snd_start, sizeof(unsigned long));
+		memcpy(iph+opt->prip+iph[opt->prip+2]+sizeof(unsigned long)-1, &pripid, sizeof(u16));
+		memset(iph+opt->prip+iph[opt->prip+2]+sizeof(unsigned long)+sizeof(u16)-1, 0,1);
+	}
+#endif
 
 	if (!is_frag) {
 		if (opt->rr_needaddr)
@@ -76,6 +97,14 @@ void ip_options_build(struct sk_buff *skb, struct ip_options *opt,
 		opt->ts = 0;
 		opt->ts_needaddr = opt->ts_needtime = 0;
 	}
+
+#ifdef CONFIG_PRIP
+	if (opt->prip) {
+		memset(iph+opt->prip, IPOPT_NOP, iph[opt->prip+1]);
+		opt->prip = 0;
+	}
+#endif
+
 }
 
 /*
@@ -192,6 +221,21 @@ int __ip_options_echo(struct net *net, struct ip_options *dopt,
 		dptr += optlen;
 		dopt->optlen += optlen;
 	}
+
+#ifdef CONFIG_PRIP
+	if (sopt->prip) {
+		read_lock_bh(&prip_config.rwlock);
+		if (prip_config.valid > 0){ //lcw
+			optlen = sptr[sopt->prip+1];
+			dopt->prip = dopt->optlen+sizeof(struct iphdr);
+			memcpy(dptr, sptr+sopt->prip, optlen);
+			dptr += optlen;
+			dopt->optlen += optlen;
+		}
+		read_unlock_bh(&prip_config.rwlock);
+	}
+#endif
+
 	while (dopt->optlen & 3) {
 		*dptr++ = IPOPT_END;
 		dopt->optlen++;
@@ -234,6 +278,9 @@ void ip_options_fragment(struct sk_buff *skb)
 	opt->rr_needaddr = 0;
 	opt->ts_needaddr = 0;
 	opt->ts_needtime = 0;
+#ifdef CONFIG_PRIP
+	opt->prip = 0;
+#endif		
 }
 
 /* helper used by ip_options_compile() to call fib_compute_spec_dst()
@@ -451,6 +498,27 @@ int __ip_options_compile(struct net *net,
 				goto error;
 			}
 			break;
+#ifdef CONFIG_PRIP
+		case IPOPT_PRIP: 
+			if (opt->prip) { 
+				pp_ptr = optptr;
+				goto error;
+			}
+			if (optlen < 3) {
+				pp_ptr = optptr + 1;
+				goto error;
+			}
+			if (optlen < 14) {
+				pp_ptr = optptr + 1;
+				goto error;
+			}
+			if (optptr[2] != 4) {
+				pp_ptr = optptr + 2;
+				goto error;
+			}
+			opt->prip = optptr-iph;
+			break;
+#endif
 		case IPOPT_SEC:
 		case IPOPT_SID:
 		default:
@@ -538,6 +606,25 @@ static int ip_options_get_finish(struct net *net, struct ip_options_rcu **optp,
 	*optp = opt;
 	return 0;
 }
+
+#ifdef CONFIG_PRIP
+int ip_options_get_from_prip(struct net *net, struct ip_options_rcu **optp,
+				unsigned char *data, int optlen)
+{
+	struct ip_options_rcu *opt = ip_options_get_alloc(optlen);
+
+	if (!opt)
+		return -ENOMEM;
+	if (optlen)
+		memcpy(opt->opt.__data, data, optlen);
+	else {
+		kfree(opt);
+		return -EFAULT;
+	}
+	return ip_options_get_finish(net, optp, opt, optlen);
+}
+#endif
+
 
 int ip_options_get_from_user(struct net *net, struct ip_options_rcu **optp,
 			     unsigned char __user *data, int optlen)

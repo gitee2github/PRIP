@@ -402,7 +402,7 @@ struct sock {
 	};
 
 #ifdef CONFIG_PRIP
-	struct dst_entry    *sk_dup_dst_cache;
+struct dst_entry    *sk_dup_dst_cache;
 	struct prip_priv *priv;
 	bool prip_set;
 #endif
