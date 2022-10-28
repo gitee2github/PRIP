@@ -117,13 +117,19 @@ struct rtable *ip_route_output_key_hash(struct net *net, struct flowi4 *flp,
 struct rtable *ip_route_output_key_hash_rcu(struct net *net, struct flowi4 *flp,
 					    struct fib_result *res,
 					    const struct sk_buff *skb);
-
+struct rtable *ip_route_output_key_hash_rcu_prip(struct net *net, struct flowi4 *flp,
+					    struct fib_result *res,
+					    const struct sk_buff *skb);
 static inline struct rtable *__ip_route_output_key(struct net *net,
 						   struct flowi4 *flp)
 {
 	return ip_route_output_key_hash(net, flp, NULL);
 }
-
+static inline struct rtable *__ip_route_output_key_prip(struct net *net,
+						   struct flowi4 *flp)
+{
+	return ip_route_output_key_hash(net, flp, NULL);
+}
 struct rtable *ip_route_output_flow(struct net *, struct flowi4 *flp,
 				    const struct sock *sk);
 struct dst_entry *ipv4_blackhole_route(struct net *net,
