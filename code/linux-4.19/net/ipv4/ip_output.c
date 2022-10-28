@@ -2120,8 +2120,35 @@ void ip_send_unicast_reply(struct sock *sk, struct sk_buff *skb,
 			   arg->uid);
 	security_skb_classify_flow(skb, flowi4_to_flowi(&fl4));
 	rt = ip_route_output_key(net, &fl4);
-	if (IS_ERR(rt))
+	if (IS_ERR(rt)){
+
+#ifdef CONFIG_PRIP
+		if (replyopts.opt.opt.optlen && (replyopts.opt.opt.prip > 1)) {
+			__be32 dupdaddr = master_to_slave(daddr);
+			if (!dupdaddr)
+				return;
+			flowi4_init_output(&fl4, 0,
+					   IP4_REPLY_MARK(net, skb->mark),
+					   RT_TOS(ip_hdr(skb)->tos),
+					   RT_SCOPE_UNIVERSE, ip_hdr(skb)->protocol,
+					   ip_reply_arg_flowi_flags(arg),
+					   dupdaddr, saddr,
+					   tcp_hdr(skb)->source, tcp_hdr(skb)->dest,
+					   arg->uid);
+			rt = ip_route_output_key(net, &fl4);
+			if (IS_ERR(rt)) 
+				return;
+		/*	if (dupdaddr != rt->rt_gateway) {
+				ip_rt_put(rt);
+				return;
+			}*/
+			pointer = ipc.opt->opt.__data;
+			memset(pointer + ipc.opt->opt.prip + pointer[ipc.opt->opt.prip+2-sizeof(struct iphdr)] + sizeof(unsigned long)-1 + sizeof(__be16) - sizeof(struct iphdr), 1, sizeof(unsigned char));
+		} else
+#endif
+
 		return;
+	}
 
 	inet_sk(sk)->tos = arg->tos;
 
