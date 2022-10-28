@@ -365,11 +365,6 @@ static struct prip_priv * prip_priv_create(__u32 localip,__u32 peerip,int hash){
 
 }
 
-*
- *
- *localip and peerip :net byte order
- *
- */
 struct prip_priv * prip_priv_find(__u32 localip, __u32 peerip){
     int hash;
     struct prip_priv * q;

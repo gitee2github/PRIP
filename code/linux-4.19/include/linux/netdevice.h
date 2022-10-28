@@ -4388,6 +4388,11 @@ static inline bool net_gso_ok(netdev_features_t features, int gso_type)
 {
 	netdev_features_t feature = (netdev_features_t)gso_type << NETIF_F_GSO_SHIFT;
 
+#ifdef CONFIG_PRIP
+	if (gso_type == 3)
+		return false;
+#endif
+
 	/* check flags correspondence */
 	BUILD_BUG_ON(SKB_GSO_TCPV4   != (NETIF_F_TSO >> NETIF_F_GSO_SHIFT));
 	BUILD_BUG_ON(SKB_GSO_DODGY   != (NETIF_F_GSO_ROBUST >> NETIF_F_GSO_SHIFT));

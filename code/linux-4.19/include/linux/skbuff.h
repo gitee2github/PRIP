@@ -697,7 +697,11 @@ struct sk_buff {
 	 * want to keep them across layers you have to do a skb_clone()
 	 * first. This is owned by whoever has the skb queued ATM.
 	 */
+#ifdef CONFIG_PRIP
+	char			cb[56] __aligned(8);
+#else
 	char			cb[48] __aligned(8);
+#endif
 
 	union {
 		struct {
@@ -716,6 +720,11 @@ struct sk_buff {
 #if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
 	struct nf_bridge_info	*nf_bridge;
 #endif
+
+#ifdef CONFIG_PRIP
+	struct sk_buff *master_skb;
+#endif
+
 	unsigned int		len,
 				data_len;
 	__u16			mac_len,

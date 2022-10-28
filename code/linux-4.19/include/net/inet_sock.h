@@ -55,7 +55,12 @@ struct ip_options {
 			ts_needaddr:1;
 	unsigned char	router_alert;
 	unsigned char	cipso;
+#ifdef CONFIG_PRIP
+	unsigned char 	prip;
+
+#else
 	unsigned char	__pad2;
+#endif
 	unsigned char	__data[0];
 };
 

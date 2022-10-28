@@ -75,4 +75,33 @@ struct prip_priv{
     struct timer_list timer;
 };
 
+extern int set_prip_mode(struct sock *sk, int mode);
+extern __u32 master_to_slave(__u32 master_ip);
+extern __u32 slave_to_master(__u32 slave_ip);
+extern void set_slave_stat(struct prip_priv *q , __u32 stat);
+extern void set_master_stat(struct prip_priv *q , __u32 stat);
+extern __u32  get_master_or_slave(int flag);
+extern void master_send_inc(struct prip_priv *q);
+extern void master_recv_inc(struct prip_priv *q);
+extern void slave_send_inc(struct prip_priv *q);
+extern void slave_recv_inc(struct prip_priv *q);
+extern int get_prip_alarm(void);
+extern void prip_priv_put(struct prip_priv *q);
+extern void prip_priv_timeout(struct timer_list *t);
+extern struct prip_priv *prip_priv_find(__u32 localip, __u32 peerip);
+extern struct prip_priv *prip_priv_only_find(__u32 localip, __u32 peerip);
+extern  PRIP_CONFIG_T prip_config;
+extern  bool prip_isinited;
+extern  atomic_t prip_alarm;
+extern  struct proc_dir_entry *dir_prip;
+extern  struct proc_dir_entry *prip_config_entry;
+extern  struct proc_dir_entry *prip_status_entry;
+extern  struct proc_dir_entry *prip_alarm_entry;
+
+extern struct prip_hash_list prip_hash[PRIP_HASHSZ];
+extern struct prip_hash_list prip_single_list;
+extern int prip_check(u16 seq, int isdup, struct prip_priv *priv, unsigned long start);
+extern  u16 get_pripid(struct prip_priv *priv, unsigned long *snd_start);
+extern int check_prip_net(__u32 addr);
+
 #endif

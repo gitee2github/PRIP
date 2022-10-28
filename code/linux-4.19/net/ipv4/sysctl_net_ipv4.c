@@ -1,1360 +1,2495 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
- * sysctl_net_ipv4.c: sysctl interface to net IPV4 subsystem.
+ * =====================================================================================
  *
- * Begun April 1, 1996, Mike Shaver.
- * Added /proc/sys/net/ipv4 directory entry (empty =) ). [MS]
+ *       Filename:  prip.c
+ *
+ *    Description:  
+ *
+ *        Version:  1.0
+ *        Created:  2014年08月28日 14时50分51秒
+ *       Revision:  none
+ *       Compiler:  gcc
+ *
+ *         Author:  dwang(), dwang@linx-info.com
+ *        Company:  Linx-info
+ *
+ * =====================================================================================
  */
-
-#include <linux/mm.h>
-#include <linux/module.h>
-#include <linux/sysctl.h>
-#include <linux/igmp.h>
-#include <linux/inetdevice.h>
-#include <linux/seqlock.h>
 #include <linux/init.h>
-#include <linux/slab.h>
+#include <linux/module.h>
+#include <linux/sched.h>
+#include <linux/version.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/types.h>
+#include <linux/proc_fs.h>
+#include <asm/atomic.h>
+#include <linux/spinlock.h>
+#include <linux/stat.h>
+#include <asm/uaccess.h>
+#include <net/sock.h>
+#include <net/inet_sock.h>
+#include <linux/list.h>
+#include <linux/seq_file.h>
+#include <linux/inetdevice.h>
+#include <linux/netdevice.h>
+#include <net/net_namespace.h>
+#include <linux/timer.h>
+#include <net/prip.h>
 #include <linux/nsproxy.h>
-#include <linux/swap.h>
-#include <net/snmp.h>
-#include <net/icmp.h>
-#include <net/ip.h>
-#include <net/route.h>
-#include <net/tcp.h>
-#include <net/udp.h>
-#include <net/cipso_ipv4.h>
-#include <net/inet_frag.h>
-#include <net/ping.h>
-#include <net/protocol.h>
-#include <net/netevent.h>
+#include <asm/bitops.h>
+#define BUFF_SIZE 1024
 
-static int zero;
-static int one = 1;
-static int two = 2;
-static int four = 4;
-static int thousand = 1000;
-static int gso_max_segs = GSO_MAX_SEGS;
-static int tcp_retr1_max = 255;
-static int ip_local_port_range_min[] = { 1, 1 };
-static int ip_local_port_range_max[] = { 65535, 65535 };
-static int tcp_adv_win_scale_min = -31;
-static int tcp_adv_win_scale_max = 31;
-static int tcp_min_snd_mss_min = TCP_MIN_SND_MSS;
-static int tcp_min_snd_mss_max = 65535;
-static int ip_privileged_port_min;
-static int ip_privileged_port_max = 65535;
-static int ip_ttl_min = 1;
-static int ip_ttl_max = 255;
-static int tcp_syn_retries_min = 1;
-static int tcp_syn_retries_max = MAX_TCP_SYNCNT;
-static int ip_ping_group_range_min[] = { 0, 0 };
-static int ip_ping_group_range_max[] = { GID_T_MAX, GID_T_MAX };
-static int comp_sack_nr_max = 255;
-static u32 u32_max_div_HZ = UINT_MAX / HZ;
-static int one_day_secs = 24 * 3600;
-static int tcp_tw_timeout_min = 1 * HZ;
-static int tcp_tw_timeout_max = 600 * HZ;
-static int tcp_rto_min_min = 1; /* one tick */
-static int tcp_rto_min_max = TCP_RTO_MAX;
 
-/* obsolete */
-static int sysctl_tcp_low_latency __read_mostly;
+struct prip_hash_list prip_hash[PRIP_HASHSZ];
+struct prip_hash_list prip_single_list;
+ PRIP_CONFIG_T prip_config;
+ atomic_t prip_alarm;
+ atomic_t prip_cache_timeout;
+ atomic_t prip_netmask;
+ EXPORT_SYMBOL(prip_netmask);
+ struct proc_dir_entry * dir_prip;
+ struct proc_dir_entry * prip_config_entry;
+ struct proc_dir_entry * prip_status_entry;
+ struct proc_dir_entry * prip_alarm_entry;
+ struct proc_dir_entry * prip_cache_timeout_entry;
+static char config_buff[BUFF_SIZE];
+static u32 jhash_prip_initval __read_mostly;
+ unsigned long prip_reboot;
+__u32 prip_net_one;
+__u32 prip_net_two;
 
-/* Update system visible IP port range */
-static void set_local_port_range(struct net *net, int range[2])
+static void deinit_prip_struct(struct prip_priv *priv)
 {
-	bool same_parity = !((range[0] ^ range[1]) & 1);
-
-	write_seqlock_bh(&net->ipv4.ip_local_ports.lock);
-	if (same_parity && !net->ipv4.ip_local_ports.warned) {
-		net->ipv4.ip_local_ports.warned = true;
-		pr_err_ratelimited("ip_local_port_range: prefer different parity for start/end values.\n");
-	}
-	net->ipv4.ip_local_ports.range[0] = range[0];
-	net->ipv4.ip_local_ports.range[1] = range[1];
-	write_sequnlock_bh(&net->ipv4.ip_local_ports.lock);
+    if(!priv) return;
+    kfree(priv->link->seq_in_top);
+    kfree(priv->link->seq_in_bottom);
+    kfree(priv->link->clear_map);
+    kfree(priv->link);
+    kfree(priv);
 }
 
-/* Validate changes from /proc interface. */
-static int ipv4_local_port_range(struct ctl_table *table, int write,
-				 void __user *buffer,
-				 size_t *lenp, loff_t *ppos)
+static struct prip_priv * init_prip_struct(__u32 localip,__u32 peerip,int hash)
 {
-	struct net *net =
-		container_of(table->data, struct net, ipv4.ip_local_ports.range);
-	int ret;
-	int range[2];
-	struct ctl_table tmp = {
-		.data = &range,
-		.maxlen = sizeof(range),
-		.mode = table->mode,
-		.extra1 = &ip_local_port_range_min,
-		.extra2 = &ip_local_port_range_max,
-	};
-
-	inet_get_local_port_range(net, &range[0], &range[1]);
-
-	ret = proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
-
-	if (write && ret == 0) {
-		/* Ensure that the upper limit is not smaller than the lower,
-		 * and that the lower does not encroach upon the privileged
-		 * port limit.
-		 */
-		if ((range[1] < range[0]) ||
-		    (range[0] < net->ipv4.sysctl_ip_prot_sock))
-			ret = -EINVAL;
-		else
-			set_local_port_range(net, range);
-	}
-
-	return ret;
+    struct prip_priv *priv=(struct  prip_priv*)kzalloc(sizeof(struct prip_priv),GFP_ATOMIC);
+    if(!priv) return priv;
+    spin_lock_init(&priv->seqnr_out_lock);
+    priv->sequence_nr_out=0;
+    spin_lock_init(&priv->seqnr_in_lock);
+    spin_lock_init(&priv->alarm_lock);
+    priv->link = (struct link_entry *)kzalloc(sizeof(struct link_entry),GFP_ATOMIC);
+    if(!priv->link) {
+	kfree(priv);
+	priv=NULL;
+	return priv;
+    }
+    priv->link->seq_in_top = (char *)kmalloc(4096,GFP_ATOMIC);
+    if(!priv->link->seq_in_top){
+        kfree(priv->link);
+        kfree(priv);
+        priv=NULL;
+        return priv;
+    }
+    priv->link->seq_in_bottom = (char *)kmalloc(4096,GFP_ATOMIC);
+    if(!priv->link->seq_in_bottom){
+    	kfree(priv->link->seq_in_top);
+        kfree(priv->link);
+        kfree(priv);
+        priv=NULL;
+        return priv;
+    }
+    priv->link->clear_map = (unsigned long *)kzalloc(4096,GFP_ATOMIC);
+    if(!priv->link->clear_map){
+	    kfree(priv->link->seq_in_top);
+	    kfree(priv->link->seq_in_bottom);
+        kfree(priv->link);
+        kfree(priv);
+        priv=NULL;
+        return priv;
+    }
+ 
+ 
+    priv->peerip=peerip;
+    priv->localip=localip;
+    spin_lock_init(&priv->timer_lock);
+    atomic_set(&priv->refcnt,0);
+    atomic_set(&priv->master_status,0);
+    atomic_set(&priv->slave_status,0);
+    atomic64_set(&priv->master_send_num,0); 
+    atomic64_set(&priv->slave_send_num,0);
+    atomic64_set(&priv->master_recv_num,0);
+    atomic64_set(&priv->slave_recv_num,0);
+    priv->prip_single_head=&prip_single_list;
+    priv->prip_hash_head=&prip_hash[hash];
+    priv->peer_slave_ip=master_to_slave(peerip);
+    timer_setup(&priv->timer,prip_priv_timeout, 0);
+    return priv;
 }
 
-/* Validate changes from /proc interface. */
-static int ipv4_privileged_ports(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	struct net *net = container_of(table->data, struct net,
-	    ipv4.sysctl_ip_prot_sock);
-	int ret;
-	int pports;
-	int range[2];
-	struct ctl_table tmp = {
-		.data = &pports,
-		.maxlen = sizeof(pports),
-		.mode = table->mode,
-		.extra1 = &ip_privileged_port_min,
-		.extra2 = &ip_privileged_port_max,
-	};
 
-	pports = net->ipv4.sysctl_ip_prot_sock;
 
-	ret = proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
+u16 get_pripid(struct prip_priv *priv,unsigned long * snd_start)
+{   
+    u16 ret;
+    if(!priv) return 0;
+    spin_lock(&priv->seqnr_out_lock);
+    if(priv->sequence_nr_out==0) ++(priv->sequence_nr_out);
+    ret = priv->sequence_nr_out;
+    if(ret==1) priv->snd_start=jiffies;
+    if(ret==32768) priv->snd_start=jiffies;
+    *snd_start=priv->snd_start;
+    ++(priv->sequence_nr_out);
+    spin_unlock(&priv->seqnr_out_lock);
+    return ret;
+}
+EXPORT_SYMBOL(get_pripid);
+static int inet_aton(const char *p){
+    int dot=0;
+    __u32 val=0,base=10,addr=0;
+    unsigned char c;
+    if(unlikely(!p))
+        return 0;
+    do{
+        c=*p;
+        switch(c){
+            case '0':case '1':
+            case '2':case '3':
+            case '4':case '5':
+            case '6':case '7':
+            case '8':case '9':
+                val=(val * base)+(c - '0');
+                break;
+            case '.':
+                if(++dot > 3)
+                    return 0;
+            case '\0':
+                if(val > 255)
+                    return 0;
+                addr = addr << 8 | val;
+                val=0;
+                break;
+            default :
+                return 0;
+        }
+    }while(*p++);
+    if(dot > 0 && dot <= 3){
+        addr <<= 8 * (3 - dot);
+        return addr;
+    }
+    if(dot == 0){
+        if(addr < 32)
+            return addr;//netmask
+        else
+            return 0;
+    }
+    return 0;
+}
+/*
+ *ip :host byte order
+ */
+static int inet_ntoa(char *buff,__u32 ip){
+    IP_ADDR tmp;
+    tmp.ip=ip;
+    if(unlikely(!buff))
+        return 0;
+#if defined(__LITTLE_ENDIAN_BITFIELD)
+    sprintf(buff,"%d.%d.%d.%d",tmp.buff[3],tmp.buff[2],tmp.buff[1],tmp.buff[0]);
+#elif defined(__BIG_ENDIAN_BITFIELD)
+    sprintf(buff,"%d.%d.%d.%d",tmp.buff[0],tmp.buff[1],tmp.buff[2],tmp.buff[3]);
+#endif
+    return 1;
+}
+static void * prip_status_seq_start (struct seq_file * fd,loff_t * pos){
 
-	if (write && ret == 0) {
-		inet_get_local_port_range(net, &range[0], &range[1]);
-		/* Ensure that the local port range doesn't overlap with the
-		 * privileged port range.
-		 */
-		if (range[0] < pports)
-			ret = -EINVAL;
-		else
-			net->ipv4.sysctl_ip_prot_sock = pports;
-	}
+    if(*pos==0)
+        return &prip_single_list;
+    else
+        return NULL;
+}
+static void * prip_status_seq_next (struct seq_file * fd ,void * v,loff_t *pos){
 
-	return ret;
+    (*pos)++;
+    return NULL;
+}
+static void prip_status_seq_stop (struct seq_file * fd ,void *v){
+
+    return;
+}
+static int prip_status_seq_show (struct seq_file *fd,void *v){
+    int on=0;
+    char m_stat[6];
+    char s_stat[6];
+    int m_stat_flag=0;
+    int s_stat_flag=0;
+    unsigned int m_net=0;
+    unsigned int s_net=0;
+    char master_net[16];
+    char slave_net[16];
+    char local_net[16];
+    struct prip_priv * q;
+    struct prip_hash_list * tmp = (struct prip_hash_list *)v;
+
+    read_lock_bh(&prip_config.rwlock);
+    if(prip_config.valid <= 0){
+        read_unlock_bh(&prip_config.rwlock);
+        return 0;
+    }else{
+       if(atomic_read(&prip_config.reference)>0){
+           on=1;
+	   m_net=prip_config.net_one;
+           s_net=prip_config.net_two;
+       }
+    }
+    read_unlock_bh(&prip_config.rwlock);
+    if(!on){
+        seq_printf(fd,"PRIP_ON/OFF \n");
+        seq_printf(fd,"%8s\n","off");
+    }else{
+        inet_ntoa(master_net,m_net);
+        inet_ntoa(slave_net,s_net);
+        seq_printf(fd,"PRIP_ON/OFF \tPRIP_NET_ONE\tPRIP_NET_TWO\tPRIP_REFCNT \n");
+        seq_printf(fd,"%8s \t%8s \t%8s \t%8u\n\n","on",master_net,slave_net,atomic_read(&prip_config.reference));
+    }
+
+    seq_printf(fd,"local_ip \trefcnt\tpeer_master_ip\tpeer_slave_ip\tmaster_state\tslave_state\tmaster_sent\tslave_sent\tmaster_recv\tslave_recv\t\n");
+    read_lock_bh(&tmp->rwlock);
+    hlist_for_each_entry(q,&tmp->head,single_list){
+           m_stat_flag=atomic_read(&q->master_status);
+           s_stat_flag=atomic_read(&q->slave_status);
+        if(m_stat_flag)
+            strcpy(m_stat,"up");
+        else
+            strcpy(m_stat,"down");
+        if(s_stat_flag)
+            strcpy(s_stat,"up");
+        else
+            strcpy(s_stat,"down");
+        inet_ntoa(master_net,ntohl(q->peerip));
+        inet_ntoa(slave_net,ntohl(q->peer_slave_ip));
+        inet_ntoa(local_net,ntohl(q->localip));
+
+        seq_printf(fd,"%8s\t%d \t%8s \t%8s \t%8s \t%8s \t%8lld \t%8lld \t%8lld \t%8lld \n",
+                        local_net,atomic_read(&q->refcnt),master_net,slave_net,m_stat,s_stat,atomic64_read(&q->master_send_num),atomic64_read(&q->slave_send_num),
+                        atomic64_read(&q->master_recv_num),
+                        atomic64_read(&q->slave_recv_num));
+    }
+    read_unlock_bh(&tmp->rwlock);
+    return 0;
+}
+static struct seq_operations prip_status_seq_ops = {
+    .start = prip_status_seq_start,
+    .stop = prip_status_seq_stop,
+    .next = prip_status_seq_next,
+    .show = prip_status_seq_show,
+};
+static int prip_status_open (struct inode * inode, struct file *file){
+    return seq_open(file,&prip_status_seq_ops);
+}
+static struct file_operations prip_status_ops = {
+    .owner = THIS_MODULE,
+    .open = prip_status_open,
+    .read = seq_read,
+    .llseek = seq_lseek,
+    .release = seq_release,
+};
+
+void prip_priv_put(struct prip_priv *q){
+    atomic_dec(&q->refcnt);
+}
+EXPORT_SYMBOL(prip_priv_put);
+void prip_priv_timeout(struct timer_list *t){
+
+    struct prip_priv *q = from_timer(q, t, timer);
+
+    if(atomic_dec_and_test(&q->refcnt)){
+        write_lock_bh(&q->prip_hash_head->rwlock);
+        if(atomic_read(&q->refcnt) == 0){
+            hlist_del(&q->hash_list);
+            write_lock_bh(&q->prip_single_head->rwlock);
+            hlist_del(&q->single_list);
+            write_unlock_bh(&q->prip_single_head->rwlock);
+            deinit_prip_struct(q);
+            write_unlock_bh(&q->prip_hash_head->rwlock);
+            return;
+        }
+        write_unlock_bh(&q->prip_hash_head->rwlock);
+    }
+    atomic_inc(&q->refcnt);
+    spin_lock(&q->timer_lock);
+    mod_timer(&q->timer,jiffies+atomic_read(&prip_cache_timeout)*60*HZ);
+    spin_unlock(&q->timer_lock);
+    
+}
+EXPORT_SYMBOL(prip_priv_timeout);
+static int prip_hashfn(__u32 localip,__u32 peerip){
+    return jhash_2words((__force u32) localip,(__force u32) peerip,jhash_prip_initval) & (PRIP_HASHSZ-1);
+}
+static struct prip_priv * prip_priv_intern(struct prip_priv * qp_in,int hash){
+    struct prip_priv *q;
+    write_lock_bh(&prip_hash[hash].rwlock);
+#ifdef CONFIG_SMP
+    hlist_for_each_entry(q,&prip_hash[hash].head,hash_list){
+        if((q->peerip == qp_in->peerip) && (q->localip == qp_in->localip)){
+            atomic_inc(&q->refcnt);
+            spin_lock(&q->timer_lock);
+            mod_timer_pending(&q->timer,jiffies+atomic_read(&prip_cache_timeout)*60*HZ);
+            spin_unlock(&q->timer_lock);
+            write_unlock_bh(&prip_hash[hash].rwlock);
+            deinit_prip_struct(qp_in);
+            return q;
+        }
+    }
+#endif
+    q=qp_in;
+    if(!mod_timer(&q->timer,jiffies+atomic_read(&prip_cache_timeout)*60*HZ))
+        atomic_inc(&q->refcnt);
+    atomic_inc(&q->refcnt);
+    hlist_add_head(&q->hash_list,&prip_hash[hash].head);
+    write_unlock_bh(&prip_hash[hash].rwlock);
+    write_lock_bh(&prip_single_list.rwlock);
+    hlist_add_head(&q->single_list,&prip_single_list.head);
+    write_unlock_bh(&prip_single_list.rwlock);
+    return q;
+}
+static struct prip_priv * prip_priv_create(__u32 localip,__u32 peerip,int hash){
+    struct prip_priv * p = init_prip_struct(localip,peerip,hash);
+    if(p == NULL)
+        return NULL;
+    return prip_priv_intern(p,hash);
+
+}
+/*
+ *
+ *localip and peerip :net byte order
+ *
+ */
+struct prip_priv * prip_priv_find(__u32 localip, __u32 peerip){
+    int hash;
+    struct prip_priv * q;
+    hash=prip_hashfn(localip,peerip);
+    read_lock_bh(&prip_hash[hash].rwlock);
+    hlist_for_each_entry(q,&prip_hash[hash].head,hash_list){
+        if((q->peerip == peerip) && (q->localip == localip)){
+            atomic_inc(&q->refcnt);
+            spin_lock(&q->timer_lock);
+            mod_timer_pending(&q->timer,jiffies+atomic_read(&prip_cache_timeout)*60*HZ);
+            spin_unlock(&q->timer_lock);
+            read_unlock_bh(&prip_hash[hash].rwlock);
+            return q;
+        }
+    }
+    read_unlock_bh(&prip_hash[hash].rwlock);
+    return prip_priv_create(localip,peerip,hash);
+}
+EXPORT_SYMBOL(prip_priv_find);
+struct prip_priv * prip_priv_only_find(__u32 localip, __u32 peerip){
+    int hash;
+    struct prip_priv * q;
+    hash=prip_hashfn(localip,peerip);
+    read_lock_bh(&prip_hash[hash].rwlock);
+    hlist_for_each_entry(q,&prip_hash[hash].head,hash_list){
+        if((q->peerip == peerip) && (q->localip == localip)){
+            atomic_inc(&q->refcnt);
+            spin_lock(&q->timer_lock);
+            mod_timer_pending(&q->timer,jiffies+atomic_read(&prip_cache_timeout)*60*HZ);
+            spin_unlock(&q->timer_lock);
+            read_unlock_bh(&prip_hash[hash].rwlock);
+            return q;
+        }
+    }
+    read_unlock_bh(&prip_hash[hash].rwlock);
+    return NULL;
+}
+EXPORT_SYMBOL(prip_priv_only_find);
+
+static int get_config_ip(const char * config,char ip[3][16]){
+    int i;
+    int j= 0;
+    int k=0;
+    int len;
+    int flag=0;
+    unsigned char c;
+    if(config == NULL || ip ==NULL)
+        return 0;
+    len=strlen(config);
+    for(i=0;i<(len+1);i++){
+        c = *(config+i);
+        switch(c){
+            case ' ':
+                if(flag){
+                    if ((j==2) && (k <16)){
+                        ip[j][k]='\0';
+                        return 1;
+                    }
+                    if(j >2 || k > 15)
+                        return 0; 
+                    ip[j][k]='\0';
+                    j++;
+                    k=0;
+                    flag = 0;
+                }
+                break;
+            case '0': case '1': 
+            case '2': case '3':
+            case '4': case '5':
+            case '6': case '7':
+            case '8':case '9':
+            case '.':
+                flag = 1;
+                if(k > 15 || j >2)
+                    return 0;
+                ip[j][k] = c;
+                k++;
+                break;
+            case '\n':
+            case '\0':
+                if((j==2)&&(k<16)){
+                    ip[j][k] = '\0';
+                    return 1;
+                }else
+                    return 0;
+            default:
+                return 0;
+        }
+    }
+    return 1;
 }
 
-static void inet_get_ping_group_range_table(struct ctl_table *table, kgid_t *low, kgid_t *high)
+static ssize_t write_prip_config( struct file *file,const char __user * buffer,size_t len, loff_t *f_pos) 
 {
-	kgid_t *data = table->data;
-	struct net *net =
-		container_of(table->data, struct net, ipv4.ping_group_range.range);
-	unsigned int seq;
-	do {
-		seq = read_seqbegin(&net->ipv4.ping_group_range.lock);
+    char data[BUFF_SIZE];
+    char ip[3][16];
+    __u32 net_one;
+    __u32 net_two;
+    __u32 netmask;
+    __u32 tmp_mask=0;
+    char *cache;
+    int i;
+    int clean=0;
+    unsigned long tmp=0;
+    unsigned char tmp_buff[16];
+    struct net_device *dev;
+    struct in_device *in_dev;
+    int net_one_flag=0;
+    int net_two_flag=0;
+    int net_one_ip=0;
+    int net_two_ip=0;
 
-		*low = data[0];
-		*high = data[1];
-	} while (read_seqretry(&net->ipv4.ping_group_range.lock, seq));
-}
+    if( len > BUFF_SIZE-1)
+        return -E2BIG;
+    memset(config_buff,0,BUFF_SIZE);
+    memset(tmp_buff,0,sizeof(tmp_buff));
+    if(copy_from_user(config_buff,buffer,len)){
+        return -EINVAL;
+    }
+    for(i=0;i<len;i++){
+        if(config_buff[i]==' ' || config_buff[i]=='\n'){
+            tmp++;
+        }
+    }
+    if(tmp == len)
+        clean = 1;
+    read_lock_bh(&prip_config.rwlock);
+    if(atomic_read(&(prip_config.reference)) > 0){
+        read_unlock_bh(&prip_config.rwlock);
+        return -EBUSY;
+    }
+    read_unlock_bh(&prip_config.rwlock);
+    strcpy((char *)data,config_buff);
+    if(!clean) {
+        if( len < 17 ) 
+            return -EINVAL;
+        if(!get_config_ip(config_buff,ip))
+            return -EINVAL;
+        cache =ip[0];
+        if(!(net_one=inet_aton(cache)))
+            return -EINVAL;
+        cache =ip[1];
+        if(!(net_two=inet_aton(cache)))
+            return -EINVAL;
+        cache =ip[2];
+        if(!(netmask=inet_aton(cache)))
+            return -EINVAL;
+        if((netmask <=0) || (netmask >=32))
+            return -EINVAL;
+        for(i=1;i<=netmask;i++){
+            tmp_mask |= 1<< (32-i);
+        }
+		prip_net_one = net_one;
+		prip_net_two = net_two;
+        net_one = net_one & tmp_mask;
+        net_two = net_two & tmp_mask;
 
-/* Update system visible IP port range */
-static void set_ping_group_range(struct ctl_table *table, kgid_t low, kgid_t high)
-{
-	kgid_t *data = table->data;
-	struct net *net =
-		container_of(table->data, struct net, ipv4.ping_group_range.range);
-	write_seqlock(&net->ipv4.ping_group_range.lock);
-	data[0] = low;
-	data[1] = high;
-	write_sequnlock(&net->ipv4.ping_group_range.lock);
-}
+        read_lock_bh(&dev_base_lock);
+        list_for_each_entry(dev,&(current->nsproxy->net_ns->dev_base_head),dev_list){
+            if(dev){
+                in_dev = (struct in_device *)(dev->ip_ptr);
+                if(in_dev && in_dev->ifa_list){
+                    printk("dwang debug :in_dev->ifa_list->ifa_mask=0x%x,0x%x\n",in_dev->ifa_list->ifa_mask,ntohl(in_dev->ifa_list->ifa_mask));
+                    if((ntohl(in_dev->ifa_list->ifa_address) & tmp_mask)== net_one){
+                        net_one_flag=1;
+                        printk("net_one_flag[%d]two_flag[%d]\n",net_one_flag,net_two_flag);
+                        net_one_ip=(ntohl(in_dev->ifa_list->ifa_address) & (~ tmp_mask));
+                        if(net_two_flag)
+                            break;
+                    }else{
+                        if((ntohl(in_dev->ifa_list->ifa_address) & tmp_mask)== net_two){
+                            net_two_flag=1;
+                            printk("net_one_flag[%d]two_flag[%d]\n",net_one_flag,net_two_flag);
+                            net_two_ip=(ntohl(in_dev->ifa_list->ifa_address) & (~ tmp_mask));
+                            if(net_one_flag)
+                                break;
+                        }
+                    }
+                }
+            }
+        }
+        read_unlock_bh(&dev_base_lock);
+printk("net_one_ip =[%d]two_ip[%d]\n",net_one_ip,net_two_ip);
+        if(!(net_one_flag && net_two_flag))
+            return -ENXIO;
+        if((net_one_ip != net_two_ip) || (net_one_ip == 0) ||(net_two_ip==0))
+            return -ENXIO;
+        write_lock_bh(&(prip_config.rwlock));
+        if(atomic_read(&(prip_config.reference)) > 0){
+            write_unlock_bh(&prip_config.rwlock);
+            return -EBUSY;
+        }
+        prip_config.valid=1;
+        prip_config.net_one=net_one;
+        prip_config.net_two=net_two;
+        prip_config.mask=tmp_mask;
+        atomic_set(&prip_config.reference,0);
+        write_unlock_bh(&(prip_config.rwlock));
+        atomic_set(&prip_netmask,tmp_mask);
 
-/* Validate changes from /proc interface. */
-static int ipv4_ping_group_range(struct ctl_table *table, int write,
-				 void __user *buffer,
-				 size_t *lenp, loff_t *ppos)
-{
-	struct user_namespace *user_ns = current_user_ns();
-	int ret;
-	gid_t urange[2];
-	kgid_t low, high;
-	struct ctl_table tmp = {
-		.data = &urange,
-		.maxlen = sizeof(urange),
-		.mode = table->mode,
-		.extra1 = &ip_ping_group_range_min,
-		.extra2 = &ip_ping_group_range_max,
-	};
-
-	inet_get_ping_group_range_table(table, &low, &high);
-	urange[0] = from_kgid_munged(user_ns, low);
-	urange[1] = from_kgid_munged(user_ns, high);
-	ret = proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
-
-	if (write && ret == 0) {
-		low = make_kgid(user_ns, urange[0]);
-		high = make_kgid(user_ns, urange[1]);
-		if (!gid_valid(low) || !gid_valid(high))
-			return -EINVAL;
-		if (urange[1] < urange[0] || gid_lt(high, low)) {
-			low = make_kgid(&init_user_ns, 1);
-			high = make_kgid(&init_user_ns, 0);
+        memset((char *)data,0,BUFF_SIZE);
+        inet_ntoa(tmp_buff,net_one);
+        i=sprintf((char *)data,"%s ",tmp_buff);
+        inet_ntoa(tmp_buff,net_two);
+        i+=sprintf(((char *)data + i),"%s ",tmp_buff);
+        sprintf(((char *)data+i),"%d\n",netmask);
+	    strcpy(config_buff,data);
+    } else {
+        write_lock_bh(&(prip_config.rwlock));
+		if(init_net.ipv4.sysctl_prip_set){
+			write_unlock_bh(&prip_config.rwlock);
+			return -EBUSY;
 		}
-		set_ping_group_range(table, low, high);
-	}
-
-	return ret;
+        if(atomic_read(&(prip_config.reference)) > 0){
+            write_unlock_bh(&prip_config.rwlock);
+            return -EBUSY;
+        }
+        prip_config.valid=0;
+        atomic_set(&prip_config.reference,0);
+        write_unlock_bh(&(prip_config.rwlock));
+        atomic_set(&prip_netmask,0);
+       	*((char *)data)='\0';
+		strcpy(config_buff,data);
+    }
+    return len;
 }
 
-static int ipv4_fwd_update_priority(struct ctl_table *table, int write,
-				    void __user *buffer,
-				    size_t *lenp, loff_t *ppos)
+static int read_prip_config(struct seq_file *seq,void *v)
 {
-	struct net *net;
-	int ret;
-
-	net = container_of(table->data, struct net,
-			   ipv4.sysctl_ip_fwd_update_priority);
-	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
-	if (write && ret == 0)
-		call_netevent_notifiers(NETEVENT_IPV4_FWD_UPDATE_PRIORITY_UPDATE,
-					net);
-
-	return ret;
-}
-
-static int proc_tcp_congestion_control(struct ctl_table *ctl, int write,
-				       void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	struct net *net = container_of(ctl->data, struct net,
-				       ipv4.tcp_congestion_control);
-	char val[TCP_CA_NAME_MAX];
-	struct ctl_table tbl = {
-		.data = val,
-		.maxlen = TCP_CA_NAME_MAX,
-	};
-	int ret;
-
-	tcp_get_default_congestion_control(net, val);
-
-	ret = proc_dostring(&tbl, write, buffer, lenp, ppos);
-	if (write && ret == 0)
-		ret = tcp_set_default_congestion_control(net, val);
-	return ret;
-}
-
-static int proc_tcp_available_congestion_control(struct ctl_table *ctl,
-						 int write,
-						 void __user *buffer, size_t *lenp,
-						 loff_t *ppos)
-{
-	struct ctl_table tbl = { .maxlen = TCP_CA_BUF_MAX, };
-	int ret;
-
-	tbl.data = kmalloc(tbl.maxlen, GFP_USER);
-	if (!tbl.data)
-		return -ENOMEM;
-	tcp_get_available_congestion_control(tbl.data, TCP_CA_BUF_MAX);
-	ret = proc_dostring(&tbl, write, buffer, lenp, ppos);
-	kfree(tbl.data);
-	return ret;
-}
-
-static int proc_allowed_congestion_control(struct ctl_table *ctl,
-					   int write,
-					   void __user *buffer, size_t *lenp,
-					   loff_t *ppos)
-{
-	struct ctl_table tbl = { .maxlen = TCP_CA_BUF_MAX };
-	int ret;
-
-	tbl.data = kmalloc(tbl.maxlen, GFP_USER);
-	if (!tbl.data)
-		return -ENOMEM;
-
-	tcp_get_allowed_congestion_control(tbl.data, tbl.maxlen);
-	ret = proc_dostring(&tbl, write, buffer, lenp, ppos);
-	if (write && ret == 0)
-		ret = tcp_set_allowed_congestion_control(tbl.data);
-	kfree(tbl.data);
-	return ret;
-}
-
-static int proc_tcp_fastopen_key(struct ctl_table *table, int write,
-				 void __user *buffer, size_t *lenp,
-				 loff_t *ppos)
-{
-	struct net *net = container_of(table->data, struct net,
-	    ipv4.sysctl_tcp_fastopen);
-	struct ctl_table tbl = { .maxlen = (TCP_FASTOPEN_KEY_LENGTH * 2 + 10) };
-	struct tcp_fastopen_context *ctxt;
-	u32  user_key[4]; /* 16 bytes, matching TCP_FASTOPEN_KEY_LENGTH */
-	__le32 key[4];
-	int ret, i;
-
-	tbl.data = kmalloc(tbl.maxlen, GFP_KERNEL);
-	if (!tbl.data)
-		return -ENOMEM;
-
-	rcu_read_lock();
-	ctxt = rcu_dereference(net->ipv4.tcp_fastopen_ctx);
-	if (ctxt)
-		memcpy(key, ctxt->key, TCP_FASTOPEN_KEY_LENGTH);
-	else
-		memset(key, 0, sizeof(key));
-	rcu_read_unlock();
-
-	for (i = 0; i < ARRAY_SIZE(key); i++)
-		user_key[i] = le32_to_cpu(key[i]);
-
-	snprintf(tbl.data, tbl.maxlen, "%08x-%08x-%08x-%08x",
-		user_key[0], user_key[1], user_key[2], user_key[3]);
-	ret = proc_dostring(&tbl, write, buffer, lenp, ppos);
-
-	if (write && ret == 0) {
-		if (sscanf(tbl.data, "%x-%x-%x-%x", user_key, user_key + 1,
-			   user_key + 2, user_key + 3) != 4) {
-			ret = -EINVAL;
-			goto bad_key;
-		}
-
-		for (i = 0; i < ARRAY_SIZE(user_key); i++)
-			key[i] = cpu_to_le32(user_key[i]);
-
-		tcp_fastopen_reset_cipher(net, NULL, key,
-					  TCP_FASTOPEN_KEY_LENGTH);
-	}
-
-bad_key:
-	pr_debug("proc FO key set 0x%x-%x-%x-%x <- 0x%s: %u\n",
-		user_key[0], user_key[1], user_key[2], user_key[3],
-	       (char *)tbl.data, ret);
-	kfree(tbl.data);
-	return ret;
-}
-
-static void proc_configure_early_demux(int enabled, int protocol)
-{
-	struct net_protocol *ipprot;
-#if IS_ENABLED(CONFIG_IPV6)
-	struct inet6_protocol *ip6prot;
-#endif
-
-	rcu_read_lock();
-
-	ipprot = rcu_dereference(inet_protos[protocol]);
-	if (ipprot)
-		ipprot->early_demux = enabled ? ipprot->early_demux_handler :
-						NULL;
-
-#if IS_ENABLED(CONFIG_IPV6)
-	ip6prot = rcu_dereference(inet6_protos[protocol]);
-	if (ip6prot)
-		ip6prot->early_demux = enabled ? ip6prot->early_demux_handler :
-						 NULL;
-#endif
-	rcu_read_unlock();
-}
-
-static int proc_tcp_early_demux(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	int ret = 0;
-
-	ret = proc_dointvec(table, write, buffer, lenp, ppos);
-
-	if (write && !ret) {
-		int enabled = init_net.ipv4.sysctl_tcp_early_demux;
-
-		proc_configure_early_demux(enabled, IPPROTO_TCP);
-	}
-
-	return ret;
-}
-
-static int proc_udp_early_demux(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	int ret = 0;
-
-	ret = proc_dointvec(table, write, buffer, lenp, ppos);
-
-	if (write && !ret) {
-		int enabled = init_net.ipv4.sysctl_udp_early_demux;
-
-		proc_configure_early_demux(enabled, IPPROTO_UDP);
-	}
-
-	return ret;
-}
-
-static int proc_tfo_blackhole_detect_timeout(struct ctl_table *table,
-					     int write,
-					     void __user *buffer,
-					     size_t *lenp, loff_t *ppos)
-{
-	struct net *net = container_of(table->data, struct net,
-	    ipv4.sysctl_tcp_fastopen_blackhole_timeout);
-	int ret;
-
-	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
-	if (write && ret == 0)
-		atomic_set(&net->ipv4.tfo_active_disable_times, 0);
-
-	return ret;
-}
-
-static int proc_tcp_available_ulp(struct ctl_table *ctl,
-				  int write,
-				  void __user *buffer, size_t *lenp,
-				  loff_t *ppos)
-{
-	struct ctl_table tbl = { .maxlen = TCP_ULP_BUF_MAX, };
-	int ret;
-
-	tbl.data = kmalloc(tbl.maxlen, GFP_USER);
-	if (!tbl.data)
-		return -ENOMEM;
-	tcp_get_available_ulp(tbl.data, TCP_ULP_BUF_MAX);
-	ret = proc_dostring(&tbl, write, buffer, lenp, ppos);
-	kfree(tbl.data);
-
-	return ret;
-}
-
-#ifdef CONFIG_IP_ROUTE_MULTIPATH
-static int proc_fib_multipath_hash_policy(struct ctl_table *table, int write,
-					  void __user *buffer, size_t *lenp,
-					  loff_t *ppos)
-{
-	struct net *net = container_of(table->data, struct net,
-	    ipv4.sysctl_fib_multipath_hash_policy);
-	int ret;
-
-	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
-	if (write && ret == 0)
-		call_netevent_notifiers(NETEVENT_IPV4_MPATH_HASH_UPDATE, net);
-
-	return ret;
-}
-#endif
-
-static int proc_tcp_rto_min(struct ctl_table *table,
-			    int write, void __user *buffer,
-			    size_t *lenp, loff_t *ppos)
-{
-	int ret = 0;
-
-	ret = proc_dointvec_ms_jiffies_minmax(table, write, buffer, lenp, ppos);
-	if (write && !ret) {
-		struct net *net = container_of(table->data, struct net,
-					       ipv4.sysctl_tcp_rto_min);
-		int tcp_rto_min = init_net.ipv4.sysctl_tcp_rto_min;
-
-		TCP_UPD_STATS(net, TCP_MIB_RTOMIN, tcp_rto_min * 1000 / HZ);
-	}
-
-	return ret;
-}
-
-static struct ctl_table ipv4_table[] = {
-	{
-		.procname	= "tcp_max_orphans",
-		.data		= &sysctl_tcp_max_orphans,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "inet_peer_threshold",
-		.data		= &inet_peer_threshold,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "inet_peer_minttl",
-		.data		= &inet_peer_minttl,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_jiffies,
-	},
-	{
-		.procname	= "inet_peer_maxttl",
-		.data		= &inet_peer_maxttl,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_jiffies,
-	},
-	{
-		.procname	= "tcp_mem",
-		.maxlen		= sizeof(sysctl_tcp_mem),
-		.data		= &sysctl_tcp_mem,
-		.mode		= 0644,
-		.proc_handler	= proc_doulongvec_minmax,
-	},
-	{
-		.procname	= "tcp_low_latency",
-		.data		= &sysctl_tcp_low_latency,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-#ifdef CONFIG_NETLABEL
-	{
-		.procname	= "cipso_cache_enable",
-		.data		= &cipso_v4_cache_enabled,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "cipso_cache_bucket_size",
-		.data		= &cipso_v4_cache_bucketsize,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "cipso_rbm_optfmt",
-		.data		= &cipso_v4_rbm_optfmt,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "cipso_rbm_strictvalid",
-		.data		= &cipso_v4_rbm_strictvalid,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-#endif /* CONFIG_NETLABEL */
-	{
-		.procname	= "tcp_available_congestion_control",
-		.maxlen		= TCP_CA_BUF_MAX,
-		.mode		= 0444,
-		.proc_handler   = proc_tcp_available_congestion_control,
-	},
-	{
-		.procname	= "tcp_allowed_congestion_control",
-		.maxlen		= TCP_CA_BUF_MAX,
-		.mode		= 0644,
-		.proc_handler   = proc_allowed_congestion_control,
-	},
-	{
-		.procname	= "tcp_available_ulp",
-		.maxlen		= TCP_ULP_BUF_MAX,
-		.mode		= 0444,
-		.proc_handler   = proc_tcp_available_ulp,
-	},
-	{
-		.procname	= "icmp_msgs_per_sec",
-		.data		= &sysctl_icmp_msgs_per_sec,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-	},
-	{
-		.procname	= "icmp_msgs_burst",
-		.data		= &sysctl_icmp_msgs_burst,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-	},
-	{
-		.procname	= "udp_mem",
-		.data		= &sysctl_udp_mem,
-		.maxlen		= sizeof(sysctl_udp_mem),
-		.mode		= 0644,
-		.proc_handler	= proc_doulongvec_minmax,
-	},
-	{ }
-};
-
-static struct ctl_table ipv4_net_table[] = {
-	{
-		.procname	= "icmp_echo_ignore_all",
-		.data		= &init_net.ipv4.sysctl_icmp_echo_ignore_all,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "icmp_echo_ignore_broadcasts",
-		.data		= &init_net.ipv4.sysctl_icmp_echo_ignore_broadcasts,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "icmp_ignore_bogus_error_responses",
-		.data		= &init_net.ipv4.sysctl_icmp_ignore_bogus_error_responses,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "icmp_errors_use_inbound_ifaddr",
-		.data		= &init_net.ipv4.sysctl_icmp_errors_use_inbound_ifaddr,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "icmp_ratelimit",
-		.data		= &init_net.ipv4.sysctl_icmp_ratelimit,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_ms_jiffies,
-	},
-	{
-		.procname	= "icmp_ratemask",
-		.data		= &init_net.ipv4.sysctl_icmp_ratemask,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-#ifdef CONFIG_ICMP_PINGTRACE
-	{
-		.procname       = "icmp_pingtrace_node_id",
-		.data           = &init_net.ipv4.sysctl_icmp_pingtrace_node_id,
-		.maxlen         = sizeof(u64),
-		.mode           = 0644,
-		.proc_handler   = proc_doulongvec_minmax,
-	},
-#endif
-	{
-		.procname	= "ping_group_range",
-		.data		= &init_net.ipv4.ping_group_range.range,
-		.maxlen		= sizeof(gid_t)*2,
-		.mode		= 0644,
-		.proc_handler	= ipv4_ping_group_range,
-	},
-	{
-		.procname	= "tcp_ecn",
-		.data		= &init_net.ipv4.sysctl_tcp_ecn,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_ecn_fallback",
-		.data		= &init_net.ipv4.sysctl_tcp_ecn_fallback,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "ip_dynaddr",
-		.data		= &init_net.ipv4.sysctl_ip_dynaddr,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "ip_early_demux",
-		.data		= &init_net.ipv4.sysctl_ip_early_demux,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname       = "udp_early_demux",
-		.data           = &init_net.ipv4.sysctl_udp_early_demux,
-		.maxlen         = sizeof(int),
-		.mode           = 0644,
-		.proc_handler   = proc_udp_early_demux
-	},
-	{
-		.procname       = "tcp_early_demux",
-		.data           = &init_net.ipv4.sysctl_tcp_early_demux,
-		.maxlen         = sizeof(int),
-		.mode           = 0644,
-		.proc_handler   = proc_tcp_early_demux
-	},
-	{
-		.procname	= "ip_default_ttl",
-		.data		= &init_net.ipv4.sysctl_ip_default_ttl,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &ip_ttl_min,
-		.extra2		= &ip_ttl_max,
-	},
-	{
-		.procname	= "ip_local_port_range",
-		.maxlen		= sizeof(init_net.ipv4.ip_local_ports.range),
-		.data		= &init_net.ipv4.ip_local_ports.range,
-		.mode		= 0644,
-		.proc_handler	= ipv4_local_port_range,
-	},
-	{
-		.procname	= "ip_local_reserved_ports",
-		.data		= &init_net.ipv4.sysctl_local_reserved_ports,
-		.maxlen		= 65536,
-		.mode		= 0644,
-		.proc_handler	= proc_do_large_bitmap,
-	},
-	{
-		.procname	= "ip_no_pmtu_disc",
-		.data		= &init_net.ipv4.sysctl_ip_no_pmtu_disc,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "ip_forward_use_pmtu",
-		.data		= &init_net.ipv4.sysctl_ip_fwd_use_pmtu,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "ip_forward_update_priority",
-		.data		= &init_net.ipv4.sysctl_ip_fwd_update_priority,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler   = ipv4_fwd_update_priority,
-		.extra1		= &zero,
-		.extra2		= &one,
-	},
-	{
-		.procname	= "ip_nonlocal_bind",
-		.data		= &init_net.ipv4.sysctl_ip_nonlocal_bind,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "fwmark_reflect",
-		.data		= &init_net.ipv4.sysctl_fwmark_reflect,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "tcp_fwmark_accept",
-		.data		= &init_net.ipv4.sysctl_tcp_fwmark_accept,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-#ifdef CONFIG_NET_L3_MASTER_DEV
-	{
-		.procname	= "tcp_l3mdev_accept",
-		.data		= &init_net.ipv4.sysctl_tcp_l3mdev_accept,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-		.extra2		= &one,
-	},
-#endif
-	{
-		.procname	= "tcp_mtu_probing",
-		.data		= &init_net.ipv4.sysctl_tcp_mtu_probing,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "tcp_base_mss",
-		.data		= &init_net.ipv4.sysctl_tcp_base_mss,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "tcp_min_snd_mss",
-		.data		= &init_net.ipv4.sysctl_tcp_min_snd_mss,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &tcp_min_snd_mss_min,
-		.extra2		= &tcp_min_snd_mss_max,
-	},
-	{
-		.procname	= "tcp_probe_threshold",
-		.data		= &init_net.ipv4.sysctl_tcp_probe_threshold,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "tcp_probe_interval",
-		.data		= &init_net.ipv4.sysctl_tcp_probe_interval,
-		.maxlen		= sizeof(u32),
-		.mode		= 0644,
-		.proc_handler	= proc_douintvec_minmax,
-		.extra2		= &u32_max_div_HZ,
-	},
-	{
-		.procname	= "igmp_link_local_mcast_reports",
-		.data		= &init_net.ipv4.sysctl_igmp_llm_reports,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "igmp_max_memberships",
-		.data		= &init_net.ipv4.sysctl_igmp_max_memberships,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "igmp_max_msf",
-		.data		= &init_net.ipv4.sysctl_igmp_max_msf,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-#ifdef CONFIG_IP_MULTICAST
-	{
-		.procname	= "igmp_qrv",
-		.data		= &init_net.ipv4.sysctl_igmp_qrv,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &one
-	},
-#endif
-	{
-		.procname	= "tcp_congestion_control",
-		.data		= &init_net.ipv4.tcp_congestion_control,
-		.mode		= 0644,
-		.maxlen		= TCP_CA_NAME_MAX,
-		.proc_handler	= proc_tcp_congestion_control,
-	},
-	{
-		.procname	= "tcp_keepalive_time",
-		.data		= &init_net.ipv4.sysctl_tcp_keepalive_time,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_jiffies,
-	},
-	{
-		.procname	= "tcp_keepalive_probes",
-		.data		= &init_net.ipv4.sysctl_tcp_keepalive_probes,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_keepalive_intvl",
-		.data		= &init_net.ipv4.sysctl_tcp_keepalive_intvl,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_jiffies,
-	},
-	{
-		.procname	= "tcp_syn_retries",
-		.data		= &init_net.ipv4.sysctl_tcp_syn_retries,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &tcp_syn_retries_min,
-		.extra2		= &tcp_syn_retries_max
-	},
-	{
-		.procname	= "tcp_synack_retries",
-		.data		= &init_net.ipv4.sysctl_tcp_synack_retries,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-#ifdef CONFIG_SYN_COOKIES
-	{
-		.procname	= "tcp_syncookies",
-		.data		= &init_net.ipv4.sysctl_tcp_syncookies,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-#endif
-	{
-		.procname	= "tcp_reordering",
-		.data		= &init_net.ipv4.sysctl_tcp_reordering,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_retries1",
-		.data		= &init_net.ipv4.sysctl_tcp_retries1,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra2		= &tcp_retr1_max
-	},
-	{
-		.procname	= "tcp_retries2",
-		.data		= &init_net.ipv4.sysctl_tcp_retries2,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_tw_timeout",
-		.data		= &init_net.ipv4.sysctl_tcp_tw_timeout,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_jiffies_minmax,
-		.extra1		= &tcp_tw_timeout_min,
-		.extra2		= &tcp_tw_timeout_max
-	},
-	{
-		.procname	= "tcp_orphan_retries",
-		.data		= &init_net.ipv4.sysctl_tcp_orphan_retries,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_fin_timeout",
-		.data		= &init_net.ipv4.sysctl_tcp_fin_timeout,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_jiffies,
-	},
-	{
-		.procname	= "tcp_notsent_lowat",
-		.data		= &init_net.ipv4.sysctl_tcp_notsent_lowat,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= proc_douintvec,
-	},
-	{
-		.procname	= "tcp_tw_reuse",
-		.data		= &init_net.ipv4.sysctl_tcp_tw_reuse,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-		.extra2		= &two,
-	},
-	{
-		.procname	= "tcp_max_tw_buckets",
-		.data		= &init_net.ipv4.tcp_death_row.sysctl_max_tw_buckets,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_max_syn_backlog",
-		.data		= &init_net.ipv4.sysctl_max_syn_backlog,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_fastopen",
-		.data		= &init_net.ipv4.sysctl_tcp_fastopen,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "tcp_fastopen_key",
-		.mode		= 0600,
-		.data		= &init_net.ipv4.sysctl_tcp_fastopen,
-		.maxlen		= ((TCP_FASTOPEN_KEY_LENGTH * 2) + 10),
-		.proc_handler	= proc_tcp_fastopen_key,
-	},
-	{
-		.procname	= "tcp_fastopen_blackhole_timeout_sec",
-		.data		= &init_net.ipv4.sysctl_tcp_fastopen_blackhole_timeout,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_tfo_blackhole_detect_timeout,
-		.extra1		= &zero,
-	},
-#ifdef CONFIG_IP_ROUTE_MULTIPATH
-	{
-		.procname	= "fib_multipath_use_neigh",
-		.data		= &init_net.ipv4.sysctl_fib_multipath_use_neigh,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-		.extra2		= &one,
-	},
-	{
-		.procname	= "fib_multipath_hash_policy",
-		.data		= &init_net.ipv4.sysctl_fib_multipath_hash_policy,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_fib_multipath_hash_policy,
-		.extra1		= &zero,
-		.extra2		= &one,
-	},
-#endif
-	{
-		.procname	= "ip_unprivileged_port_start",
-		.maxlen		= sizeof(int),
-		.data		= &init_net.ipv4.sysctl_ip_prot_sock,
-		.mode		= 0644,
-		.proc_handler	= ipv4_privileged_ports,
-	},
-#ifdef CONFIG_NET_L3_MASTER_DEV
-	{
-		.procname	= "udp_l3mdev_accept",
-		.data		= &init_net.ipv4.sysctl_udp_l3mdev_accept,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-		.extra2		= &one,
-	},
-#endif
-	{
-		.procname	= "tcp_sack",
-		.data		= &init_net.ipv4.sysctl_tcp_sack,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_window_scaling",
-		.data		= &init_net.ipv4.sysctl_tcp_window_scaling,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_timestamps",
-		.data		= &init_net.ipv4.sysctl_tcp_timestamps,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_early_retrans",
-		.data		= &init_net.ipv4.sysctl_tcp_early_retrans,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-		.extra2		= &four,
-	},
-	{
-		.procname	= "tcp_recovery",
-		.data		= &init_net.ipv4.sysctl_tcp_recovery,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname       = "tcp_thin_linear_timeouts",
-		.data           = &init_net.ipv4.sysctl_tcp_thin_linear_timeouts,
-		.maxlen         = sizeof(int),
-		.mode           = 0644,
-		.proc_handler   = proc_dointvec
-	},
-	{
-		.procname	= "tcp_slow_start_after_idle",
-		.data		= &init_net.ipv4.sysctl_tcp_slow_start_after_idle,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_retrans_collapse",
-		.data		= &init_net.ipv4.sysctl_tcp_retrans_collapse,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_stdurg",
-		.data		= &init_net.ipv4.sysctl_tcp_stdurg,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_rfc1337",
-		.data		= &init_net.ipv4.sysctl_tcp_rfc1337,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_abort_on_overflow",
-		.data		= &init_net.ipv4.sysctl_tcp_abort_on_overflow,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_fack",
-		.data		= &init_net.ipv4.sysctl_tcp_fack,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_max_reordering",
-		.data		= &init_net.ipv4.sysctl_tcp_max_reordering,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_dsack",
-		.data		= &init_net.ipv4.sysctl_tcp_dsack,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_app_win",
-		.data		= &init_net.ipv4.sysctl_tcp_app_win,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_adv_win_scale",
-		.data		= &init_net.ipv4.sysctl_tcp_adv_win_scale,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &tcp_adv_win_scale_min,
-		.extra2		= &tcp_adv_win_scale_max,
-	},
-	{
-		.procname	= "tcp_frto",
-		.data		= &init_net.ipv4.sysctl_tcp_frto,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_no_metrics_save",
-		.data		= &init_net.ipv4.sysctl_tcp_nometrics_save,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "tcp_moderate_rcvbuf",
-		.data		= &init_net.ipv4.sysctl_tcp_moderate_rcvbuf,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "tcp_tso_win_divisor",
-		.data		= &init_net.ipv4.sysctl_tcp_tso_win_divisor,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "tcp_workaround_signed_windows",
-		.data		= &init_net.ipv4.sysctl_tcp_workaround_signed_windows,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_limit_output_bytes",
-		.data		= &init_net.ipv4.sysctl_tcp_limit_output_bytes,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_challenge_ack_limit",
-		.data		= &init_net.ipv4.sysctl_tcp_challenge_ack_limit,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "tcp_min_tso_segs",
-		.data		= &init_net.ipv4.sysctl_tcp_min_tso_segs,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &one,
-		.extra2		= &gso_max_segs,
-	},
-	{
-		.procname	= "tcp_min_rtt_wlen",
-		.data		= &init_net.ipv4.sysctl_tcp_min_rtt_wlen,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-		.extra2		= &one_day_secs
-	},
-	{
-		.procname	= "tcp_autocorking",
-		.data		= &init_net.ipv4.sysctl_tcp_autocorking,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-		.extra2		= &one,
-	},
-	{
-		.procname	= "tcp_invalid_ratelimit",
-		.data		= &init_net.ipv4.sysctl_tcp_invalid_ratelimit,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_ms_jiffies,
-	},
-	{
-		.procname	= "tcp_pacing_ss_ratio",
-		.data		= &init_net.ipv4.sysctl_tcp_pacing_ss_ratio,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-		.extra2		= &thousand,
-	},
-	{
-		.procname	= "tcp_pacing_ca_ratio",
-		.data		= &init_net.ipv4.sysctl_tcp_pacing_ca_ratio,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-		.extra2		= &thousand,
-	},
-	{
-		.procname	= "tcp_wmem",
-		.data		= &init_net.ipv4.sysctl_tcp_wmem,
-		.maxlen		= sizeof(init_net.ipv4.sysctl_tcp_wmem),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &one,
-	},
-	{
-		.procname	= "tcp_rmem",
-		.data		= &init_net.ipv4.sysctl_tcp_rmem,
-		.maxlen		= sizeof(init_net.ipv4.sysctl_tcp_rmem),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &one,
-	},
-	{
-		.procname	= "tcp_comp_sack_delay_ns",
-		.data		= &init_net.ipv4.sysctl_tcp_comp_sack_delay_ns,
-		.maxlen		= sizeof(unsigned long),
-		.mode		= 0644,
-		.proc_handler	= proc_doulongvec_minmax,
-	},
-	{
-		.procname	= "tcp_comp_sack_nr",
-		.data		= &init_net.ipv4.sysctl_tcp_comp_sack_nr,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-		.extra2		= &comp_sack_nr_max,
-	},
-	{
-		.procname	= "tcp_rto_min",
-		.data		= &init_net.ipv4.sysctl_tcp_rto_min,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_tcp_rto_min,
-		.extra1		= &tcp_rto_min_min,
-		.extra2		= &tcp_rto_min_max
-	},
-	{
-		.procname	= "udp_rmem_min",
-		.data		= &init_net.ipv4.sysctl_udp_rmem_min,
-		.maxlen		= sizeof(init_net.ipv4.sysctl_udp_rmem_min),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &one
-	},
-	{
-		.procname	= "udp_wmem_min",
-		.data		= &init_net.ipv4.sysctl_udp_wmem_min,
-		.maxlen		= sizeof(init_net.ipv4.sysctl_udp_wmem_min),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &one
-	},
-	{ }
-};
-
-static __net_init int ipv4_sysctl_init_net(struct net *net)
-{
-	struct ctl_table *table;
-
-	table = ipv4_net_table;
-	if (!net_eq(net, &init_net)) {
-		int i;
-
-		table = kmemdup(table, sizeof(ipv4_net_table), GFP_KERNEL);
-		if (!table)
-			goto err_alloc;
-
-		/* Update the variables to point into the current struct net */
-		for (i = 0; i < ARRAY_SIZE(ipv4_net_table) - 1; i++)
-			table[i].data += (void *)net - (void *)&init_net;
-	}
-
-	net->ipv4.ipv4_hdr = register_net_sysctl(net, "net/ipv4", table);
-	if (!net->ipv4.ipv4_hdr)
-		goto err_reg;
-
-	net->ipv4.sysctl_local_reserved_ports = kzalloc(65536 / 8, GFP_KERNEL);
-	if (!net->ipv4.sysctl_local_reserved_ports)
-		goto err_ports;
-
-	return 0;
-
-err_ports:
-	unregister_net_sysctl_table(net->ipv4.ipv4_hdr);
-err_reg:
-	if (!net_eq(net, &init_net))
-		kfree(table);
-err_alloc:
-	return -ENOMEM;
-}
-
-static __net_exit void ipv4_sysctl_exit_net(struct net *net)
-{
-	struct ctl_table *table;
-
-	kfree(net->ipv4.sysctl_local_reserved_ports);
-	table = net->ipv4.ipv4_hdr->ctl_table_arg;
-	unregister_net_sysctl_table(net->ipv4.ipv4_hdr);
-	kfree(table);
-}
-
-static __net_initdata struct pernet_operations ipv4_sysctl_ops = {
-	.init = ipv4_sysctl_init_net,
-	.exit = ipv4_sysctl_exit_net,
-};
-
-static __init int sysctl_ipv4_init(void)
-{
-	struct ctl_table_header *hdr;
-
-	hdr = register_net_sysctl(&init_net, "net/ipv4", ipv4_table);
-	if (!hdr)
-		return -ENOMEM;
-
-	if (register_pernet_subsys(&ipv4_sysctl_ops)) {
-		unregister_net_sysctl_table(hdr);
-		return -ENOMEM;
-	}
-
+	seq_printf(seq,"%s",config_buff);
 	return 0;
 }
 
-__initcall(sysctl_ipv4_init);
+static ssize_t write_prip_alarm( struct file *file,const char __user * buffer,size_t len, loff_t *f_pos)
+{
+    int val=0;
+    char cache[128];
+    char c;
+    int space_flag=0;
+    int base=10;
+    char *p=cache;
+    if(len > 128)
+        return -EINVAL;
+
+    if(copy_from_user(cache,buffer,len))
+        return -EINVAL;
+    do{
+        c=*p;
+        switch(c){
+            case '0':case '1':case '2':case '3':case '4':
+            case '5':case '6':case '7':case '8':case '9':
+                val=val*base + (c - '0');
+                space_flag=1;
+                break;
+            case ' ':
+                if(space_flag)
+                    *p='\0';
+                break;
+            case '\n':
+                *p='\0';
+                break;
+            default:
+                return -EINVAL;
+        }
+    }while(*p++);
+    if(val > 0)
+        atomic_set(&prip_alarm,val);
+    else
+        return -EINVAL;
+    return len;
+}
+
+static int read_prip_alarm(struct seq_file *seq,void *v)
+{
+	seq_printf(seq,"%d\n",atomic_read(&prip_alarm));
+	return 0;
+}
+
+static ssize_t write_prip_cache_timeout( struct file *file,const char __user * buffer,size_t len, loff_t *f_pos)
+{
+    int val=0;
+    char cache[128];
+    char c;
+    int space_flag=0;
+    int base=10;
+    char *p=cache;
+    if(len > 128)
+        return -EINVAL;
+    //get_user(val,(int __user *)buffer);
+    if(copy_from_user(cache,buffer,len))
+        return -EINVAL;
+    do{
+        c=*p;
+        switch(c){
+            case '0':case '1':case '2':case '3':case '4':
+            case '5':case '6':case '7':case '8':case '9':
+                val=val*base + (c - '0');
+                space_flag=1;
+                break;
+            case ' ':
+                if(space_flag)
+                    *p='\0';
+                break;
+            case '\n':
+                *p='\0';
+                break;
+            default:
+                return -EINVAL;
+        }
+    }while(*p++);
+    if(val > 0)
+        atomic_set(&prip_cache_timeout,val);
+    else
+        return -EINVAL;
+    return len;
+}
+
+static int read_prip_cache_timeout(struct seq_file *seq,void *v)
+{
+	seq_printf(seq,"%d\n",atomic_read(&prip_cache_timeout));
+	return 0;
+}
+
+static int seq_open_prip_cache_timeout(struct inode *inode, struct file *file)
+{
+	return single_open(file,read_prip_cache_timeout,inode->i_private);
+}
+
+static int seq_open_prip_alarm(struct inode *inode, struct file *file)
+{
+	return single_open(file,read_prip_alarm,inode->i_private);
+}
+
+static int seq_open_prip_config(struct inode *inode, struct file *file)
+{
+	return single_open(file,read_prip_config,inode->i_private);
+}
+
+static struct file_operations prip_config_ops = {
+	.open	=	seq_open_prip_config,
+	.read	=	seq_read,
+	.llseek	=	seq_lseek,
+	.write	= 	write_prip_config,
+	.owner	=	THIS_MODULE,
+	.release	=	single_release,
+};
+
+static struct file_operations prip_alarm_ops = {
+	.open	=	seq_open_prip_alarm,
+	.read	=	seq_read,
+	.write	= 	write_prip_alarm,
+	.owner	=	THIS_MODULE,
+};
+
+static struct file_operations prip_cache_timeout_ops = {
+	.open	=	seq_open_prip_cache_timeout,
+	.read	=	seq_read,
+	.write	= 	write_prip_cache_timeout,
+	.owner	=	THIS_MODULE,
+};
+
+/* 
+ * mode : 
+ *      1 :reference count +1;
+ *      0 :reference count -1;
+ * return : 
+ *        -1 :failed or error
+ *        0 :success
+ * */
+int set_prip_mode(struct sock * sk,int mode)
+{
+    struct inet_sock *inet;
+    if(unlikely(!sk))
+        return -1;
+    read_lock_bh(&prip_config.rwlock);
+    if(prip_config.valid <= 0){
+        read_unlock_bh(&prip_config.rwlock);
+        return -1;
+    }
+    read_unlock_bh(&prip_config.rwlock);
+    inet=inet_sk(sk);
+    if(mode){
+           if(inet->inet_rcv_saddr && !ipv4_is_multicast(inet->inet_rcv_saddr)){
+                write_lock_bh(&prip_config.rwlock);
+                if((ntohl(inet->inet_rcv_saddr) & prip_config.mask)!=prip_config.net_one){
+		    if((ntohl(inet->inet_rcv_saddr) & prip_config.mask)!=prip_config.net_two){
+                            write_unlock_bh(&prip_config.rwlock);
+                            return -1;
+		    }
+		}
+	    }else{
+		write_lock_bh(&prip_config.rwlock);
+            }
+            atomic_inc(&prip_config.reference);
+            write_unlock_bh(&prip_config.rwlock);
+    }else{
+        write_lock_bh(&prip_config.rwlock);
+        if(atomic_read(&prip_config.reference)==0){
+            write_unlock_bh(&prip_config.rwlock);
+            return -1;
+        }
+        atomic_dec(&prip_config.reference);
+#ifdef CONFIG_PRIP
+    if(sk->priv){
+        prip_priv_put(sk->priv);
+        sk->priv=NULL;
+    }
+#endif
+        write_unlock_bh(&prip_config.rwlock);
+    }
+    return 0;
+}
+EXPORT_SYMBOL(set_prip_mode);
+/* 
+ *@flag : 1: get master network
+ *          0: get slave network
+ *
+ * retrun: master or slave network.(net byte order).
+ *         if prip_config.reference==0 or prip_config.master==0,return 0.
+ * */
+ __u32  get_master_or_slave(int flag){
+    __u32 d_addr=0;
+    read_lock_bh(&prip_config.rwlock);
+    if(prip_config.valid <= 0||(atomic_read(&prip_config.reference)<=0)){
+        read_unlock_bh(&prip_config.rwlock);
+        return 0;
+    }else{
+        if(atomic_read(&prip_config.reference) > 0){
+            if(flag){
+                if(prip_config.net_one_flag){
+                    d_addr=prip_config.net_one;
+                    read_unlock_bh(&prip_config.rwlock);
+                    return htonl(d_addr);
+                }else{
+                    d_addr=prip_config.net_two;
+                    read_unlock_bh(&prip_config.rwlock);
+                    return htonl(d_addr);
+                }
+            }else{
+                if(prip_config.net_one_flag){
+                    d_addr=prip_config.net_two;
+                    read_unlock_bh(&prip_config.rwlock);
+                    return htonl(d_addr);
+                }else{
+                    d_addr=prip_config.net_one;
+                    read_unlock_bh(&prip_config.rwlock);
+                    return htonl(d_addr);
+                }
+            }
+        }
+    }
+    read_unlock_bh(&prip_config.rwlock);
+    return htonl(d_addr);
+    
+}
+EXPORT_SYMBOL(get_master_or_slave);
+/* 
+ *saddr  is  net byte order ip.
+ *flag :1:master to slave. 0 :slave to master.
+ * the return value: 
+ *                   0 :ip unmatched or prip_config not set.
+ *                   >0: slave ip(net byte order).
+ * */
+//unsigned int master_to_slave(unsigned int master_ip){
+static __u32  __ip_addr_trans(__u32 s_addr){
+    __u32 d_addr=0;		
+    __u32 tmp_ip= 0;
+
+    if(ipv4_is_multicast(s_addr)) 
+	    return s_addr;
+
+    tmp_ip= ntohl(s_addr);
+    read_lock_bh(&prip_config.rwlock);
+    if(prip_config.valid <= 0){
+        read_unlock_bh(&prip_config.rwlock);
+        return 0;
+    }else{
+	if((tmp_ip & prip_config.mask)==prip_config.net_one){
+	    d_addr = prip_config.net_two | (tmp_ip & (~prip_config.mask));
+                        read_unlock_bh(&prip_config.rwlock);
+                        return htonl(d_addr);
+	}
+	else if((tmp_ip & prip_config.mask)==prip_config.net_two)
+	{
+	    d_addr = prip_config.net_one | (tmp_ip & (~prip_config.mask));
+            read_unlock_bh(&prip_config.rwlock);
+            return htonl(d_addr);
+        }else{
+//			if(prip_config.mask > 0){
+//				d_addr = tmp_ip ^ (1 << (32 - prip_config.mask));
+//				read_unlock_bh(&prip_config.rwlock);
+//				return htonl(d_addr);
+//			}else{
+				read_unlock_bh(&prip_config.rwlock);
+            	return 0;
+//			}
+		}
+    }
+}
+/* 
+ *master_ip is  net byte order
+ * the return value: 
+ *                   0 :ip unmatched or prip_config not set.
+ *                   >0: slave ip(net byte order).
+ * */
+__u32  master_to_slave(__u32 master_ip){
+    return __ip_addr_trans(master_ip);
+}
+EXPORT_SYMBOL(master_to_slave);
+/* 
+ * slave_ip is  net byte order
+ * the return value: 
+ *                   0 :ip unmatched or prip_config not set.
+ *                   >0: master ip(net byte order).
+ * */
+__u32 slave_to_master(__u32 slave_ip){
+    return __ip_addr_trans(slave_ip);
+}
+EXPORT_SYMBOL(slave_to_master);
+/*
+ *stat : 1 to up ;0 to down
+ * */
+void set_master_stat(struct prip_priv *q,__u32 stat){
+    if(stat > 0)
+        atomic_set(&q->master_status,1);
+    else
+        atomic_set(&q->master_status,0);
+}
+EXPORT_SYMBOL(set_master_stat);
+/*
+ *stat : 1 to up ;0 to down
+ * */
+void set_slave_stat(struct prip_priv *q,__u32 stat){
+    if(stat > 0)
+        atomic_set(&q->slave_status,1);
+    else
+        atomic_set(&q->slave_status,0);
+}
+EXPORT_SYMBOL(set_slave_stat);
+void master_send_inc(struct prip_priv *q){
+    atomic64_inc(&q->master_send_num);
+    if(atomic64_read(&q->master_send_num)==0){
+        atomic64_set(&q->master_recv_num,0);
+        atomic64_set(&q->slave_send_num,0);
+        atomic64_set(&q->slave_recv_num,0);
+    }
+}
+EXPORT_SYMBOL(master_send_inc);
+void master_recv_inc(struct prip_priv *q){
+    atomic64_inc(&q->master_recv_num);
+    if(atomic64_read(&q->master_recv_num)==0){
+        atomic64_set(&q->master_send_num,0);
+        atomic64_set(&q->slave_send_num,0);
+        atomic64_set(&q->slave_recv_num,0);
+    }
+}
+EXPORT_SYMBOL(master_recv_inc);
+void slave_send_inc(struct prip_priv *q){
+    atomic64_inc(&q->slave_send_num);
+    if(atomic64_read(&q->slave_send_num)==0){
+        atomic64_set(&q->master_send_num,0);
+        atomic64_set(&q->master_recv_num,0);
+        atomic64_set(&q->slave_recv_num,0);
+    }
+}
+EXPORT_SYMBOL(slave_send_inc);
+void slave_recv_inc(struct prip_priv *q){
+    atomic64_inc(&q->slave_recv_num);
+    if(atomic64_read(&q->slave_recv_num)==0){
+        atomic64_set(&q->master_send_num,0);
+        atomic64_set(&q->slave_send_num,0);
+        atomic64_set(&q->master_recv_num,0);
+    }
+}
+EXPORT_SYMBOL(slave_recv_inc);
+int get_prip_alarm(void){
+    return atomic_read(&prip_alarm);
+}
+EXPORT_SYMBOL(get_prip_alarm);
+int prip_check(u16 seq,int isdup,struct prip_priv* priv,unsigned long start)
+{   
+    int pos = 1 - isdup;
+    unsigned long rcv_time=jiffies;
+    int index=seq>>8;
+    index<<=1;
+    if(isdup) set_slave_stat(priv,1);
+    else
+	    set_master_stat(priv,1);
+    
+    spin_lock(&priv->alarm_lock);
+    priv->link->lostcount[isdup]=0;
+    if(++(priv->link->lostcount[pos]) > get_prip_alarm()){
+	    priv->link->lostcount[pos]=0;
+	    spin_unlock(&priv->alarm_lock);
+	    if(pos) {
+            __u32 saddr,daddr;
+            set_slave_stat(priv,0);
+	    saddr=master_to_slave(priv->localip);
+	    daddr=master_to_slave(priv->peerip);
+            if(saddr && daddr){
+                printk("PRIP warning :The slave network(%u.%u.%u.%u) to  (%u.%u.%u.%u) is already in the Down state.\n", 
+			(ntohl(saddr)&(0xff<<24))>>24,
+			(ntohl(saddr)&(0xff<<16))>>16,
+			(ntohl(saddr)&(0xff<<8))>>8,
+			ntohl(saddr)&0xff,
+                        (ntohl(daddr)&(0xff<<24))>>24,
+                        (ntohl(daddr)&(0xff<<16))>>16,
+                        (ntohl(daddr)&(0xff<<8))>>8,
+                        ntohl(daddr)&0xff);
+            }else
+                printk("PRIP warning :The slave network is already in the Down state.\n");
+        }   
+	    else{ 
+            __u32 saddr,daddr;
+            set_master_stat(priv,0);
+	    saddr=priv->localip;
+	    daddr=priv->peerip;
+            if(saddr&&daddr){
+                printk("PRIP warning :The master network (%u,%u.%u,%u) to (%u.%u.%u.%u) is already in the Down state.\n",
+                        (ntohl(saddr)&(0xff<<24))>>24,
+                        (ntohl(saddr)&(0xff<<16))>>16,
+                        (ntohl(saddr)&(0xff<<8))>>8,
+                        ntohl(saddr)&0xff,
+			(ntohl(daddr)&(0xff<<24))>>24,
+                        (ntohl(daddr)&(0xff<<16))>>16,
+                        (ntohl(daddr)&(0xff<<8))>>8,
+                        ntohl(daddr)&0xff);
+            }else
+                printk("PRIP warning :The master network is already in the Down state.\n");
+        }
+    }
+    else
+	 spin_unlock(&priv->alarm_lock);
+ 
+ 
+    spin_lock(&priv->seqnr_in_lock);
+    if((priv->link->clear_map[index]>rcv_time)||(rcv_time-priv->link->clear_map[index]>prip_reboot)){
+	    priv->link->clear_map[index+1]=0;
+    }
+    priv->link->clear_map[index]=rcv_time;
+    if(seq<32768){
+	if(start>priv->link->clear_map[index+1]){
+	    priv->link->clear_map[index+1]=start;
+            memset(&priv->link->seq_in_top[seq>>3],0,32);
+	}
+	if(start<priv->link->clear_map[index+1]){
+	    spin_unlock(&priv->seqnr_in_lock);
+            return 1;
+	}
+        if(priv->link->seq_in_top[seq>>3]&(1<<(seq&7))){
+	    spin_unlock(&priv->seqnr_in_lock);
+	    return 1;
+	}
+        else{
+	    priv->link->seq_in_top[seq>>3]|=(1<<(seq&7));
+	    spin_unlock(&priv->seqnr_in_lock);
+	    return 0;
+	}
+    }
+    else{	
+	seq-=32768;
+	if(start>priv->link->clear_map[index+1]){
+	    priv->link->clear_map[index+1]=start;
+            memset(&priv->link->seq_in_bottom[seq>>3],0,32);
+	}
+	if(start<priv->link->clear_map[index+1]){
+	    spin_unlock(&priv->seqnr_in_lock);
+            return 1;
+	}
+ 	if(priv->link->seq_in_bottom[seq>>3]&(1<<(seq&7))){
+	    spin_unlock(&priv->seqnr_in_lock);
+	    return 1;
+	}
+	else{
+	    priv->link->seq_in_bottom[seq>>3]|=(1<<(seq&7));
+	    spin_unlock(&priv->seqnr_in_lock);
+	    return 0;
+	}
+    }
+}
+
+EXPORT_SYMBOL(prip_check);
+
+int check_prip_net(__u32 addr)
+{
+	if( (((ntohl(addr)&(0xff<<24))>>24) == (ntohl(prip_net_one)&0xff))  || (((ntohl(addr)&(0xff<<24))>>24) == (ntohl(prip_net_two)&0xff)) ){
+		if( (((ntohl(addr)&(0xff<<16))>>16) == ((ntohl(prip_net_one)&(0xff<<8))>>8))  || (((ntohl(addr)&(0xff<<16))>>16) == ((ntohl(prip_net_two)&(0xff<<8))>>8)) ){
+			if( (((ntohl(addr)&(0xff<<8))>>8) == ((ntohl(prip_net_one)&(0xff<<16))>>16)) || (((ntohl(addr)&(0xff<<8))>>8) == ((ntohl(prip_net_two)&(0xff<<16))>>16)) ){
+				//if( ((ntohl(addr)&0xff) == (ntohl(prip_net_one)&0xff)) || ((ntohl(addr)&0xff) == (ntohl(prip_net_two)&0xff)) ){
+				//	return 0;	
+				//}
+				//printk("inputipok\n");
+				return 0;
+			}else{
+				return 1;
+			}
+		}else{
+			return 1;
+		}
+	}else{
+		return 1;
+	}
+
+}
+EXPORT_SYMBOL(check_prip_net);
+
+static int __init init_prip(void) 
+{
+    int err;
+    int i;
+
+    memset(&prip_config,0,sizeof(PRIP_CONFIG_T));
+    memset(config_buff,0,BUFF_SIZE);
+    atomic_set(&(prip_config.reference),0);
+    atomic_set(&prip_netmask,0);
+    rwlock_init(&(prip_config.rwlock));
+    atomic_set(&prip_alarm,500);
+    atomic_set(&prip_cache_timeout,1);
+    for(i=0;i<PRIP_HASHSZ;i++){
+        prip_hash[i].head.first=NULL;
+        rwlock_init(&(prip_hash[i].rwlock));
+    }
+    prip_reboot=msecs_to_jiffies(10000);
+    prip_single_list.head.first=NULL;
+    rwlock_init(&prip_single_list.rwlock);
+    get_random_bytes(&jhash_prip_initval,sizeof(jhash_prip_initval));
+
+    dir_prip = proc_mkdir("prip",NULL);
+    if(!dir_prip){
+        printk("PRIP ERROR: Cannot create /proc/prip .\n");
+        err = -1;
+        goto err_1;
+    }
+    prip_config_entry = proc_create("prip_config",S_IRUGO|S_IWUSR,dir_prip, &prip_config_ops);
+    if(!prip_config_entry){
+        printk("PRIP ERROR: Cannot create /proc/prip/prip_config .\n");
+        err = -1;
+        goto err_2;
+    }
+/*    prip_config_entry->read_proc = read_prip_config;
+    prip_config_entry->write_proc = write_prip_config;
+    prip_config_entry->data = config_buff;
+*/
+    prip_status_entry = proc_create("prip_state",S_IRUGO,dir_prip, &prip_status_ops);
+    if(!prip_status_entry){
+        printk("PRIP ERROR: Cannot create /proc/prip/prip_state .\n");
+        err = -1;
+        goto err_3;
+    }
+   // prip_status_entry->proc_fops = &prip_status_ops;
+
+    prip_alarm_entry = proc_create("prip_alarm",S_IRUGO|S_IWUSR,dir_prip, &prip_alarm_ops);
+    if(!prip_alarm_entry){
+        printk("PRIP ERROR: Cannot create /proc/prip/prip_alarm .\n");
+        err = -1;
+        goto err_4;
+    }
+/*    prip_alarm_entry->read_proc = read_prip_alarm;
+    prip_alarm_entry->write_proc = write_prip_alarm; */
+    prip_cache_timeout_entry = proc_create("prip_cache_timeout",S_IRUGO|S_IWUSR,dir_prip,&prip_cache_timeout_ops);
+    if(!prip_cache_timeout_entry) {
+        printk("PRIP ERROR: Cannot create /proc/prip/prip_cache_timeout .\n");
+        err = -1;
+        goto err_5;
+    }
+//    prip_cache_timeout_entry->read_proc = read_prip_cache_timeout;
+ //   prip_cache_timeout_entry->write_proc = write_prip_cache_timeout;
+
+    printk("PRIP modules insmod success.\n");
+    return 0;
+err_5:
+    remove_proc_entry("prip_alarm",dir_prip);
+err_4:
+    remove_proc_entry("prip_state",dir_prip);
+err_3:
+    remove_proc_entry("prip_config",dir_prip);
+err_2:
+    remove_proc_entry("prip",NULL);
+err_1:
+    return err;
+}
+static void __exit exit_prip(void){
+    remove_proc_entry("prip_cache_timeout",dir_prip);
+    remove_proc_entry("prip_alarm",dir_prip);
+    remove_proc_entry("prip_state",dir_prip);
+    remove_proc_entry("prip_config",dir_prip);
+    remove_proc_entry("prip",NULL);
+
+}
+MODULE_LICENSE("GPL");
+MODULE_VERSION("1.0");
+
+module_init(init_prip);
+module_exit(exit_prip);
+/*
+ * =====================================================================================
+ *
+ *       Filename:  prip.c
+ *
+ *    Description:  
+ *
+ *        Version:  1.0
+ *        Created:  2014年08月28日 14时50分51秒
+ *       Revision:  none
+ *       Compiler:  gcc
+ *
+ *         Author:  dwang(), dwang@linx-info.com
+ *        Company:  Linx-info
+ *
+ * =====================================================================================
+ */
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/sched.h>
+#include <linux/version.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/types.h>
+#include <linux/proc_fs.h>
+#include <asm/atomic.h>
+#include <linux/spinlock.h>
+#include <linux/stat.h>
+#include <asm/uaccess.h>
+#include <net/sock.h>
+#include <net/inet_sock.h>
+#include <linux/list.h>
+#include <linux/seq_file.h>
+#include <linux/inetdevice.h>
+#include <linux/netdevice.h>
+#include <net/net_namespace.h>
+#include <linux/timer.h>
+#include <net/prip.h>
+#include <linux/nsproxy.h>
+//#include <linux/prip.h>
+//#include <net/prip.h>
+#include <asm/bitops.h>
+#define BUFF_SIZE 1024
+
+
+struct prip_hash_list prip_hash[PRIP_HASHSZ];
+struct prip_hash_list prip_single_list;
+ PRIP_CONFIG_T prip_config;
+ atomic_t prip_alarm;
+ atomic_t prip_cache_timeout;
+ atomic_t prip_netmask;
+ EXPORT_SYMBOL(prip_netmask);
+ struct proc_dir_entry * dir_prip;
+ struct proc_dir_entry * prip_config_entry;
+ struct proc_dir_entry * prip_status_entry;
+ struct proc_dir_entry * prip_alarm_entry;
+ struct proc_dir_entry * prip_cache_timeout_entry;
+static char config_buff[BUFF_SIZE];
+static u32 jhash_prip_initval __read_mostly;
+ unsigned long prip_reboot;
+__u32 prip_net_one;
+__u32 prip_net_two;
+static void deinit_prip_struct(struct prip_priv *priv)
+{
+    if(!priv) return;
+    kfree(priv->link->seq_in_top);
+    kfree(priv->link->seq_in_bottom);
+    kfree(priv->link->clear_map);
+    kfree(priv->link);
+    kfree(priv);
+}
+
+static struct prip_priv * init_prip_struct(__u32 localip,__u32 peerip,int hash)
+{
+    struct prip_priv *priv=(struct  prip_priv*)kzalloc(sizeof(struct prip_priv),GFP_ATOMIC);
+    if(!priv) return priv;
+    spin_lock_init(&priv->seqnr_out_lock);
+    priv->sequence_nr_out=0;
+    spin_lock_init(&priv->seqnr_in_lock);
+    spin_lock_init(&priv->alarm_lock);
+    priv->link = (struct link_entry *)kzalloc(sizeof(struct link_entry),GFP_ATOMIC);
+    if(!priv->link) {
+	kfree(priv);
+	priv=NULL;
+	return priv;
+    }
+    priv->link->seq_in_top = (char *)kmalloc(4096,GFP_ATOMIC);
+    if(!priv->link->seq_in_top){
+        kfree(priv->link);
+        kfree(priv);
+        priv=NULL;
+        return priv;
+    }
+    priv->link->seq_in_bottom = (char *)kmalloc(4096,GFP_ATOMIC);
+    if(!priv->link->seq_in_bottom){
+    	kfree(priv->link->seq_in_top);
+        kfree(priv->link);
+        kfree(priv);
+        priv=NULL;
+        return priv;
+    }
+    priv->link->clear_map = (unsigned long *)kzalloc(4096,GFP_ATOMIC);
+    if(!priv->link->clear_map){
+	    kfree(priv->link->seq_in_top);
+	    kfree(priv->link->seq_in_bottom);
+        kfree(priv->link);
+        kfree(priv);
+        priv=NULL;
+        return priv;
+    }
+ 
+ 
+    priv->peerip=peerip;
+    priv->localip=localip;
+    spin_lock_init(&priv->timer_lock);
+    atomic_set(&priv->refcnt,0);
+    atomic_set(&priv->master_status,0);
+    atomic_set(&priv->slave_status,0);
+    atomic64_set(&priv->master_send_num,0); 
+    atomic64_set(&priv->slave_send_num,0);
+    atomic64_set(&priv->master_recv_num,0);
+    atomic64_set(&priv->slave_recv_num,0);
+    priv->prip_single_head=&prip_single_list;
+    priv->prip_hash_head=&prip_hash[hash];
+    priv->peer_slave_ip=master_to_slave(peerip);
+    timer_setup(&priv->timer,prip_priv_timeout, 0);
+    return priv;
+}
+
+
+
+u16 get_pripid(struct prip_priv *priv,unsigned long * snd_start)
+{   
+    u16 ret;
+    if(!priv) return 0;
+    spin_lock(&priv->seqnr_out_lock);
+    if(priv->sequence_nr_out==0) ++(priv->sequence_nr_out);
+    ret = priv->sequence_nr_out;
+    if(ret==1) priv->snd_start=jiffies;
+    if(ret==32768) priv->snd_start=jiffies;
+    *snd_start=priv->snd_start;
+    ++(priv->sequence_nr_out);
+    spin_unlock(&priv->seqnr_out_lock);
+    return ret;
+}
+EXPORT_SYMBOL(get_pripid);
+static int inet_aton(const char *p){
+    int dot=0;
+    __u32 val=0,base=10,addr=0;
+    unsigned char c;
+    if(unlikely(!p))
+        return 0;
+    do{
+        c=*p;
+        switch(c){
+            case '0':case '1':
+            case '2':case '3':
+            case '4':case '5':
+            case '6':case '7':
+            case '8':case '9':
+                val=(val * base)+(c - '0');
+                break;
+            case '.':
+                if(++dot > 3)
+                    return 0;
+            case '\0':
+                if(val > 255)
+                    return 0;
+                addr = addr << 8 | val;
+                val=0;
+                break;
+            default :
+                return 0;
+        }
+    }while(*p++);
+    if(dot > 0 && dot <= 3){
+        addr <<= 8 * (3 - dot);
+        return addr;
+    }
+    if(dot == 0){
+        if(addr < 32)
+            return addr;//netmask
+        else
+            return 0;
+    }
+    return 0;
+}
+/*
+ *ip :host byte order
+ */
+static int inet_ntoa(char *buff,__u32 ip){
+    IP_ADDR tmp;
+    tmp.ip=ip;
+    if(unlikely(!buff))
+        return 0;
+#if defined(__LITTLE_ENDIAN_BITFIELD)
+    sprintf(buff,"%d.%d.%d.%d",tmp.buff[3],tmp.buff[2],tmp.buff[1],tmp.buff[0]);
+#elif defined(__BIG_ENDIAN_BITFIELD)
+    sprintf(buff,"%d.%d.%d.%d",tmp.buff[0],tmp.buff[1],tmp.buff[2],tmp.buff[3]);
+#endif
+    return 1;
+}
+static void * prip_status_seq_start (struct seq_file * fd,loff_t * pos){
+//    printk("dwang debug : prip_status_seq_start *pos=%ld ---------\n",*pos);
+    if(*pos==0)
+        return &prip_single_list;
+    else
+        return NULL;
+}
+static void * prip_status_seq_next (struct seq_file * fd ,void * v,loff_t *pos){
+  //  printk("dwang debug :prip_status_seq_next *pos=%ld =========\n",*pos);
+    (*pos)++;
+    return NULL;
+}
+static void prip_status_seq_stop (struct seq_file * fd ,void *v){
+   // printk("dwang debug :prip_status_seq_stop ++++++++\n");
+    return;
+}
+static int prip_status_seq_show (struct seq_file *fd,void *v){
+    int on=0;
+    char m_stat[6];
+    char s_stat[6];
+    int m_stat_flag=0;
+    int s_stat_flag=0;
+    unsigned int m_net=0;
+    unsigned int s_net=0;
+    char master_net[16];
+    char slave_net[16];
+    char local_net[16];
+    struct prip_priv * q;
+    struct prip_hash_list * tmp = (struct prip_hash_list *)v;
+
+    //printk("dwang debug :prip_status_seq_show 11111111\n");
+    read_lock_bh(&prip_config.rwlock);
+    if(prip_config.valid <= 0){
+        read_unlock_bh(&prip_config.rwlock);
+        return 0;
+    }else{
+       if(atomic_read(&prip_config.reference)>0){
+           on=1;
+	   m_net=prip_config.net_one;
+           s_net=prip_config.net_two;
+       }
+    }
+    read_unlock_bh(&prip_config.rwlock);
+    if(!on){
+        seq_printf(fd,"PRIP_ON/OFF \n");
+        seq_printf(fd,"%8s\n","off");
+    }else{
+        inet_ntoa(master_net,m_net);
+        inet_ntoa(slave_net,s_net);
+        seq_printf(fd,"PRIP_ON/OFF \tPRIP_NET_ONE\tPRIP_NET_TWO\tPRIP_REFCNT \n");
+        seq_printf(fd,"%8s \t%8s \t%8s \t%8u\n\n","on",master_net,slave_net,atomic_read(&prip_config.reference));
+    }
+
+    seq_printf(fd,"local_ip \trefcnt\tpeer_master_ip\tpeer_slave_ip\tmaster_state\tslave_state\tmaster_sent\tslave_sent\tmaster_recv\tslave_recv\t\n");
+    read_lock_bh(&tmp->rwlock);
+    hlist_for_each_entry(q,&tmp->head,single_list){
+           m_stat_flag=atomic_read(&q->master_status);
+           s_stat_flag=atomic_read(&q->slave_status);
+        if(m_stat_flag)
+            strcpy(m_stat,"up");
+        else
+            strcpy(m_stat,"down");
+        if(s_stat_flag)
+            strcpy(s_stat,"up");
+        else
+            strcpy(s_stat,"down");
+        inet_ntoa(master_net,ntohl(q->peerip));
+        inet_ntoa(slave_net,ntohl(q->peer_slave_ip));
+        inet_ntoa(local_net,ntohl(q->localip));
+
+        seq_printf(fd,"%8s\t%d \t%8s \t%8s \t%8s \t%8s \t%8lld \t%8lld \t%8lld \t%8lld \n",
+                        local_net,atomic_read(&q->refcnt),master_net,slave_net,m_stat,s_stat,atomic64_read(&q->master_send_num),atomic64_read(&q->slave_send_num),
+                        atomic64_read(&q->master_recv_num),
+                        atomic64_read(&q->slave_recv_num));
+    }
+    read_unlock_bh(&tmp->rwlock);
+    return 0;
+}
+static struct seq_operations prip_status_seq_ops = {
+    .start = prip_status_seq_start,
+    .stop = prip_status_seq_stop,
+    .next = prip_status_seq_next,
+    .show = prip_status_seq_show,
+};
+static int prip_status_open (struct inode * inode, struct file *file){
+    return seq_open(file,&prip_status_seq_ops);
+}
+static struct file_operations prip_status_ops = {
+    .owner = THIS_MODULE,
+    .open = prip_status_open,
+    .read = seq_read,
+    .llseek = seq_lseek,
+    .release = seq_release,
+};
+
+void prip_priv_put(struct prip_priv *q){
+    atomic_dec(&q->refcnt);
+}
+EXPORT_SYMBOL(prip_priv_put);
+void prip_priv_timeout(struct timer_list *t){
+
+    struct prip_priv *q = from_timer(q, t, timer);
+
+    if(atomic_dec_and_test(&q->refcnt)){
+        write_lock_bh(&q->prip_hash_head->rwlock);
+        if(atomic_read(&q->refcnt) == 0){
+            hlist_del(&q->hash_list);
+            write_lock_bh(&q->prip_single_head->rwlock);
+            hlist_del(&q->single_list);
+            write_unlock_bh(&q->prip_single_head->rwlock);
+            deinit_prip_struct(q);
+            write_unlock_bh(&q->prip_hash_head->rwlock);
+            return;
+        }
+        write_unlock_bh(&q->prip_hash_head->rwlock);
+    }
+    atomic_inc(&q->refcnt);
+    spin_lock(&q->timer_lock);
+    mod_timer(&q->timer,jiffies+atomic_read(&prip_cache_timeout)*60*HZ);
+    spin_unlock(&q->timer_lock);
+    
+}
+EXPORT_SYMBOL(prip_priv_timeout);
+static int prip_hashfn(__u32 localip,__u32 peerip){
+    return jhash_2words((__force u32) localip,(__force u32) peerip,jhash_prip_initval) & (PRIP_HASHSZ-1);
+}
+static struct prip_priv * prip_priv_intern(struct prip_priv * qp_in,int hash){
+    struct prip_priv *q;
+    write_lock_bh(&prip_hash[hash].rwlock);
+#ifdef CONFIG_SMP
+    hlist_for_each_entry(q,&prip_hash[hash].head,hash_list){
+        if((q->peerip == qp_in->peerip) && (q->localip == qp_in->localip)){
+            atomic_inc(&q->refcnt);
+            spin_lock(&q->timer_lock);
+            mod_timer_pending(&q->timer,jiffies+atomic_read(&prip_cache_timeout)*60*HZ);
+            spin_unlock(&q->timer_lock);
+            write_unlock_bh(&prip_hash[hash].rwlock);
+            deinit_prip_struct(qp_in);
+            return q;
+        }
+    }
+#endif
+    q=qp_in;
+    if(!mod_timer(&q->timer,jiffies+atomic_read(&prip_cache_timeout)*60*HZ))
+        atomic_inc(&q->refcnt);
+    atomic_inc(&q->refcnt);
+    hlist_add_head(&q->hash_list,&prip_hash[hash].head);
+    write_unlock_bh(&prip_hash[hash].rwlock);
+    write_lock_bh(&prip_single_list.rwlock);
+    hlist_add_head(&q->single_list,&prip_single_list.head);
+    write_unlock_bh(&prip_single_list.rwlock);
+    return q;
+}
+static struct prip_priv * prip_priv_create(__u32 localip,__u32 peerip,int hash){
+    struct prip_priv * p = init_prip_struct(localip,peerip,hash);
+    if(p == NULL)
+        return NULL;
+    return prip_priv_intern(p,hash);
+
+}
+/*
+ *
+ *localip and peerip :net byte order
+ *
+ */
+struct prip_priv * prip_priv_find(__u32 localip, __u32 peerip){
+    int hash;
+    struct prip_priv * q;
+    hash=prip_hashfn(localip,peerip);
+    read_lock_bh(&prip_hash[hash].rwlock);
+    hlist_for_each_entry(q,&prip_hash[hash].head,hash_list){
+        if((q->peerip == peerip) && (q->localip == localip)){
+            atomic_inc(&q->refcnt);
+            spin_lock(&q->timer_lock);
+            mod_timer_pending(&q->timer,jiffies+atomic_read(&prip_cache_timeout)*60*HZ);
+            spin_unlock(&q->timer_lock);
+            read_unlock_bh(&prip_hash[hash].rwlock);
+            return q;
+        }
+    }
+    read_unlock_bh(&prip_hash[hash].rwlock);
+    return prip_priv_create(localip,peerip,hash);
+}
+EXPORT_SYMBOL(prip_priv_find);
+struct prip_priv * prip_priv_only_find(__u32 localip, __u32 peerip){
+    int hash;
+    struct prip_priv * q;
+    hash=prip_hashfn(localip,peerip);
+    read_lock_bh(&prip_hash[hash].rwlock);
+    hlist_for_each_entry(q,&prip_hash[hash].head,hash_list){
+        if((q->peerip == peerip) && (q->localip == localip)){
+            atomic_inc(&q->refcnt);
+            spin_lock(&q->timer_lock);
+            mod_timer_pending(&q->timer,jiffies+atomic_read(&prip_cache_timeout)*60*HZ);
+            spin_unlock(&q->timer_lock);
+            read_unlock_bh(&prip_hash[hash].rwlock);
+            return q;
+        }
+    }
+    read_unlock_bh(&prip_hash[hash].rwlock);
+    return NULL;
+}
+EXPORT_SYMBOL(prip_priv_only_find);
+
+static int get_config_ip(const char * config,char ip[3][16]){
+    int i;
+    int j= 0;
+    int k=0;
+    int len;
+    int flag=0;
+    unsigned char c;
+    if(config == NULL || ip ==NULL)
+        return 0;
+    len=strlen(config);
+    for(i=0;i<(len+1);i++){
+        c = *(config+i);
+        switch(c){
+            case ' ':
+                if(flag){
+                    if ((j==2) && (k <16)){
+                        ip[j][k]='\0';
+                        return 1;
+                    }
+                    if(j >2 || k > 15)
+                        return 0; 
+                    ip[j][k]='\0';
+                    j++;
+                    k=0;
+                    flag = 0;
+                }
+                break;
+            case '0': case '1': 
+            case '2': case '3':
+            case '4': case '5':
+            case '6': case '7':
+            case '8':case '9':
+            case '.':
+                flag = 1;
+                if(k > 15 || j >2)
+                    return 0;
+                ip[j][k] = c;
+                k++;
+                break;
+            case '\n':
+            case '\0':
+                if((j==2)&&(k<16)){
+                    ip[j][k] = '\0';
+                    return 1;
+                }else
+                    return 0;
+            default:
+                return 0;
+        }
+    }
+    return 1;
+}
+/*
+static ssize_t write_prip_config( struct file *file,const char __user * buffer,unsigned long len,void *data){
+    char config[BUFF_SIZE];
+    char ip[3][16];
+    __u32 net_one;
+    __u32 net_two;
+    __u32 netmask;
+    __u32 tmp_mask=0;
+    char *cache;
+    int i;
+    int clean=0;
+    unsigned long tmp=0;
+    unsigned char tmp_buff[16];
+    struct net_device *dev;
+    struct in_device *in_dev;
+    int net_one_flag=0;
+    int net_two_flag=0;
+    int net_one_ip=0;
+    int net_two_ip=0;
+
+    if( len > BUFF_SIZE-1)
+        return -E2BIG;
+    memset(config,0,BUFF_SIZE);
+    memset(tmp_buff,0,sizeof(tmp_buff));
+    if(copy_from_user(config,buffer,len)){
+        return -EINVAL;
+    }
+    for(i=0;i<len;i++){
+        if(config[i]==' ' || config[i]=='\n'){
+            tmp++;
+        }
+    }
+    if(tmp == len)
+        clean = 1;
+    read_lock_bh(&prip_config.rwlock);
+    if(atomic_read(&(prip_config.reference)) > 0){
+        read_unlock_bh(&prip_config.rwlock);
+        return -EBUSY;
+    }
+    read_unlock_bh(&prip_config.rwlock);
+    if(!clean){
+        if( len < 17 ) 
+            return -EINVAL;
+        if(!get_config_ip(config,ip))
+            return -EINVAL;
+        cache =ip[0];
+        if(!(net_one=inet_aton(cache)))
+            return -EINVAL;
+        cache =ip[1];
+        if(!(net_two=inet_aton(cache)))
+            return -EINVAL;
+        cache =ip[2];
+        if(!(netmask=inet_aton(cache)))
+            return -EINVAL;
+        if((netmask <=0) || (netmask >=32))
+            return -EINVAL;
+        for(i=1;i<=netmask;i++){
+            tmp_mask |= 1<< (32-i);
+        }
+        net_one = net_one & tmp_mask;
+        net_two = net_two & tmp_mask;
+
+        read_lock_bh(&dev_base_lock);
+        list_for_each_entry(dev,&(current->nsproxy->net_ns->dev_base_head),dev_list){
+            if(dev){
+                in_dev = (struct in_device *)(dev->ip_ptr);
+                if(in_dev && in_dev->ifa_list){
+                    //printk("dwang debug :in_dev->ifa_list->ifa_mask=0x%x,0x%x\n",in_dev->ifa_list->ifa_mask,ntohl(in_dev->ifa_list->ifa_mask));
+                    if((ntohl(in_dev->ifa_list->ifa_address) & tmp_mask)== net_one){
+                        net_one_flag=1;
+                        net_one_ip=(ntohl(in_dev->ifa_list->ifa_address) & (~ tmp_mask));
+                        if(net_two_flag)
+                            break;
+                    }else{
+                        if((ntohl(in_dev->ifa_list->ifa_address) & tmp_mask)== net_two){
+                            net_two_flag=1;
+                            net_two_ip=(ntohl(in_dev->ifa_list->ifa_address) & (~ tmp_mask));
+                            if(net_one_flag)
+                                break;
+                        }
+                    }
+                }
+            }
+        }
+        read_unlock_bh(&dev_base_lock);
+
+        if(!(net_one_flag && net_two_flag))
+            return -ENXIO;
+        if((net_one_ip != net_two_ip) || (net_one_ip == 0) ||(net_two_ip==0))
+            return -ENXIO;
+        write_lock_bh(&(prip_config.rwlock));
+        if(atomic_read(&(prip_config.reference)) > 0){
+            write_unlock_bh(&prip_config.rwlock);
+            return -EBUSY;
+        }
+        prip_config.valid=1;
+        prip_config.net_one=net_one;
+        prip_config.net_two=net_two;
+        prip_config.mask=tmp_mask;
+        atomic_set(&prip_config.reference,0);
+        write_unlock_bh(&(prip_config.rwlock));
+        atomic_set(&prip_netmask,tmp_mask);
+        if(data){
+            //strcpy((char *)data,config);
+            memset((char *)data,0,BUFF_SIZE);
+            inet_ntoa(tmp_buff,net_one);
+            i=sprintf((char *)data,"%s ",tmp_buff);
+            inet_ntoa(tmp_buff,net_two);
+            i+=sprintf(((char *)data + i),"%s ",tmp_buff);
+            sprintf(((char *)data+i),"%d\n",netmask);
+        }
+    }else{
+        write_lock_bh(&(prip_config.rwlock));
+        if(atomic_read(&(prip_config.reference)) > 0){
+            write_unlock_bh(&prip_config.rwlock);
+            return -EBUSY;
+        }
+        prip_config.valid=0;
+        atomic_set(&prip_config.reference,0);
+        write_unlock_bh(&(prip_config.rwlock));
+        atomic_set(&prip_netmask,0);
+        if(data)
+            *((char *)data)='\0';
+    }
+    return len;
+}
+*/
+static ssize_t write_prip_config( struct file *file,const char __user * buffer,size_t len, loff_t *f_pos) 
+{
+    char data[BUFF_SIZE];
+    char ip[3][16];
+    __u32 net_one;
+    __u32 net_two;
+    __u32 netmask;
+    __u32 tmp_mask=0;
+    char *cache;
+    int i;
+    int clean=0;
+    unsigned long tmp=0;
+    unsigned char tmp_buff[16];
+    struct net_device *dev;
+    struct in_device *in_dev;
+    int net_one_flag=0;
+    int net_two_flag=0;
+    int net_one_ip=0;
+    int net_two_ip=0;
+
+    if( len > BUFF_SIZE-1)
+        return -E2BIG;
+    memset(config_buff,0,BUFF_SIZE);
+    memset(tmp_buff,0,sizeof(tmp_buff));
+    if(copy_from_user(config_buff,buffer,len)){
+        return -EINVAL;
+    }
+    for(i=0;i<len;i++){
+        if(config_buff[i]==' ' || config_buff[i]=='\n'){
+            tmp++;
+        }
+    }
+    if(tmp == len)
+        clean = 1;
+    read_lock_bh(&prip_config.rwlock);
+    if(atomic_read(&(prip_config.reference)) > 0){
+        read_unlock_bh(&prip_config.rwlock);
+        return -EBUSY;
+    }
+    read_unlock_bh(&prip_config.rwlock);
+    strcpy((char *)data,config_buff);
+    if(!clean) {
+        if( len < 17 ) 
+            return -EINVAL;
+        if(!get_config_ip(config_buff,ip))
+            return -EINVAL;
+        cache =ip[0];
+        if(!(net_one=inet_aton(cache)))
+            return -EINVAL;
+        cache =ip[1];
+        if(!(net_two=inet_aton(cache)))
+            return -EINVAL;
+        cache =ip[2];
+        if(!(netmask=inet_aton(cache)))
+            return -EINVAL;
+        if((netmask <=0) || (netmask >=32))
+            return -EINVAL;
+        for(i=1;i<=netmask;i++){
+            tmp_mask |= 1<< (32-i);
+        }
+		prip_net_one = net_one;
+		prip_net_two = net_two;
+        net_one = net_one & tmp_mask;
+        net_two = net_two & tmp_mask;
+
+        read_lock_bh(&dev_base_lock);
+        list_for_each_entry(dev,&(current->nsproxy->net_ns->dev_base_head),dev_list){
+            if(dev){
+                in_dev = (struct in_device *)(dev->ip_ptr);
+                if(in_dev && in_dev->ifa_list){
+                    printk("dwang debug :in_dev->ifa_list->ifa_mask=0x%x,0x%x\n",in_dev->ifa_list->ifa_mask,ntohl(in_dev->ifa_list->ifa_mask));
+                    if((ntohl(in_dev->ifa_list->ifa_address) & tmp_mask)== net_one){
+                        net_one_flag=1;
+                        printk("net_one_flag[%d]two_flag[%d]\n",net_one_flag,net_two_flag);
+                        net_one_ip=(ntohl(in_dev->ifa_list->ifa_address) & (~ tmp_mask));
+                        if(net_two_flag)
+                            break;
+                    }else{
+                        if((ntohl(in_dev->ifa_list->ifa_address) & tmp_mask)== net_two){
+                            net_two_flag=1;
+                            printk("net_one_flag[%d]two_flag[%d]\n",net_one_flag,net_two_flag);
+                            net_two_ip=(ntohl(in_dev->ifa_list->ifa_address) & (~ tmp_mask));
+                            if(net_one_flag)
+                                break;
+                        }
+                    }
+                }
+            }
+        }
+        read_unlock_bh(&dev_base_lock);
+printk("net_one_ip =[%d]two_ip[%d]\n",net_one_ip,net_two_ip);
+        if(!(net_one_flag && net_two_flag))
+            return -ENXIO;
+        if((net_one_ip != net_two_ip) || (net_one_ip == 0) ||(net_two_ip==0))
+            return -ENXIO;
+        write_lock_bh(&(prip_config.rwlock));
+        if(atomic_read(&(prip_config.reference)) > 0){
+            write_unlock_bh(&prip_config.rwlock);
+            return -EBUSY;
+        }
+        prip_config.valid=1;
+        prip_config.net_one=net_one;
+        prip_config.net_two=net_two;
+        prip_config.mask=tmp_mask;
+        atomic_set(&prip_config.reference,0);
+        write_unlock_bh(&(prip_config.rwlock));
+        atomic_set(&prip_netmask,tmp_mask);
+
+        memset((char *)data,0,BUFF_SIZE);
+        inet_ntoa(tmp_buff,net_one);
+        i=sprintf((char *)data,"%s ",tmp_buff);
+        inet_ntoa(tmp_buff,net_two);
+        i+=sprintf(((char *)data + i),"%s ",tmp_buff);
+        sprintf(((char *)data+i),"%d\n",netmask);
+	    strcpy(config_buff,data);
+    } else {
+        write_lock_bh(&(prip_config.rwlock));
+		if(init_net.ipv4.sysctl_prip_set){
+			write_unlock_bh(&prip_config.rwlock);
+			return -EBUSY;
+		}
+        if(atomic_read(&(prip_config.reference)) > 0){
+            write_unlock_bh(&prip_config.rwlock);
+            return -EBUSY;
+        }
+        prip_config.valid=0;
+        atomic_set(&prip_config.reference,0);
+        write_unlock_bh(&(prip_config.rwlock));
+        atomic_set(&prip_netmask,0);
+       	*((char *)data)='\0';
+		strcpy(config_buff,data);
+    }
+    return len;
+}
+
+/*static int read_prip_config( char *page,char **start,off_t off,int len,int *eof,void *data){
+    if(!data){
+        *eof=0;
+        return 0;
+    }
+    if(off >0)
+        return 0;
+    //sprintf(page,"%s",(char *)data);
+    strcpy(page,(char *)data);
+    // *eof =0;
+    return strlen((char *)data);
+}*/
+
+static int read_prip_config(struct seq_file *seq,void *v)
+{
+	seq_printf(seq,"%s",config_buff);
+	return 0;
+}
+
+static ssize_t write_prip_alarm( struct file *file,const char __user * buffer,size_t len, loff_t *f_pos)
+{
+    int val=0;
+    char cache[128];
+    char c;
+    int space_flag=0;
+    int base=10;
+    char *p=cache;
+    if(len > 128)
+        return -EINVAL;
+    //get_user(val,(int __user *)buffer);
+    if(copy_from_user(cache,buffer,len))
+        return -EINVAL;
+    do{
+        c=*p;
+        switch(c){
+            case '0':case '1':case '2':case '3':case '4':
+            case '5':case '6':case '7':case '8':case '9':
+                val=val*base + (c - '0');
+                space_flag=1;
+                break;
+            case ' ':
+                if(space_flag)
+                    *p='\0';
+                break;
+            case '\n':
+                *p='\0';
+                break;
+            default:
+                return -EINVAL;
+        }
+    }while(*p++);
+    if(val > 0)
+        atomic_set(&prip_alarm,val);
+    else
+        return -EINVAL;
+    return len;
+}
+
+static int read_prip_alarm(struct seq_file *seq,void *v)
+{
+	seq_printf(seq,"%d\n",atomic_read(&prip_alarm));
+	return 0;
+}
+/*static ssize_t read_prip_alarm( char *page,char **start,off_t off,int len,int *eof,void *data){
+    int count=0;
+    if(off >0)
+        return 0;
+    count=sprintf(page,"%d\n",atomic_read(&prip_alarm));
+    return count;
+}*/
+static ssize_t write_prip_cache_timeout( struct file *file,const char __user * buffer,size_t len, loff_t *f_pos)
+{
+    int val=0;
+    char cache[128];
+    char c;
+    int space_flag=0;
+    int base=10;
+    char *p=cache;
+    if(len > 128)
+        return -EINVAL;
+    //get_user(val,(int __user *)buffer);
+    if(copy_from_user(cache,buffer,len))
+        return -EINVAL;
+    do{
+        c=*p;
+        switch(c){
+            case '0':case '1':case '2':case '3':case '4':
+            case '5':case '6':case '7':case '8':case '9':
+                val=val*base + (c - '0');
+                space_flag=1;
+                break;
+            case ' ':
+                if(space_flag)
+                    *p='\0';
+                break;
+            case '\n':
+                *p='\0';
+                break;
+            default:
+                return -EINVAL;
+        }
+    }while(*p++);
+    if(val > 0)
+        atomic_set(&prip_cache_timeout,val);
+    else
+        return -EINVAL;
+    return len;
+}
+
+static int read_prip_cache_timeout(struct seq_file *seq,void *v)
+{
+	seq_printf(seq,"%d\n",atomic_read(&prip_cache_timeout));
+	return 0;
+}
+/*
+static ssize_t read_prip_cache_timeout(struct file *file,const char __user * buffer,size_t len, loff_t *f_pos)
+    int count=0;
+    if(off >0)
+        return 0;
+    count=sprintf(page,"%d\n",atomic_read(&prip_cache_timeout));
+    return count;
+}*/
+
+static int seq_open_prip_cache_timeout(struct inode *inode, struct file *file)
+{
+	return single_open(file,read_prip_cache_timeout,inode->i_private);
+}
+
+static int seq_open_prip_alarm(struct inode *inode, struct file *file)
+{
+	return single_open(file,read_prip_alarm,inode->i_private);
+}
+
+static int seq_open_prip_config(struct inode *inode, struct file *file)
+{
+	return single_open(file,read_prip_config,inode->i_private);
+}
+
+static struct file_operations prip_config_ops = {
+	.open	=	seq_open_prip_config,
+	.read	=	seq_read,
+	.llseek	=	seq_lseek,
+	.write	= 	write_prip_config,
+	.owner	=	THIS_MODULE,
+	.release	=	single_release,
+};
+
+static struct file_operations prip_alarm_ops = {
+	.open	=	seq_open_prip_alarm,
+	.read	=	seq_read,
+	.write	= 	write_prip_alarm,
+	.owner	=	THIS_MODULE,
+};
+
+static struct file_operations prip_cache_timeout_ops = {
+	.open	=	seq_open_prip_cache_timeout,
+	.read	=	seq_read,
+	.write	= 	write_prip_cache_timeout,
+	.owner	=	THIS_MODULE,
+};
+
+/* 
+ * mode : 
+ *      1 :reference count +1;
+ *      0 :reference count -1;
+ * return : 
+ *        -1 :failed or error
+ *        0 :success
+ * */
+int set_prip_mode(struct sock * sk,int mode)
+{
+    struct inet_sock *inet;
+    if(unlikely(!sk))
+        return -1;
+    read_lock_bh(&prip_config.rwlock);
+    if(prip_config.valid <= 0){
+        read_unlock_bh(&prip_config.rwlock);
+        return -1;
+    }
+    read_unlock_bh(&prip_config.rwlock);
+    inet=inet_sk(sk);
+    if(mode){
+           if(inet->inet_rcv_saddr && !ipv4_is_multicast(inet->inet_rcv_saddr)){
+                write_lock_bh(&prip_config.rwlock);
+                if((ntohl(inet->inet_rcv_saddr) & prip_config.mask)!=prip_config.net_one){
+		    if((ntohl(inet->inet_rcv_saddr) & prip_config.mask)!=prip_config.net_two){
+                            write_unlock_bh(&prip_config.rwlock);
+                            return -1;
+		    }
+		}
+	    }else{
+		write_lock_bh(&prip_config.rwlock);
+            }
+            atomic_inc(&prip_config.reference);
+            write_unlock_bh(&prip_config.rwlock);
+    }else{
+        write_lock_bh(&prip_config.rwlock);
+        if(atomic_read(&prip_config.reference)==0){
+            write_unlock_bh(&prip_config.rwlock);
+            return -1;
+        }
+        atomic_dec(&prip_config.reference);
+#ifdef CONFIG_PRIP
+    if(sk->priv){
+        prip_priv_put(sk->priv);
+        sk->priv=NULL;
+    }
+#endif
+        write_unlock_bh(&prip_config.rwlock);
+    }
+    return 0;
+}
+EXPORT_SYMBOL(set_prip_mode);
+/* 
+ *@flag : 1: get master network
+ *          0: get slave network
+ *
+ * retrun: master or slave network.(net byte order).
+ *         if prip_config.reference==0 or prip_config.master==0,return 0.
+ * */
+ __u32  get_master_or_slave(int flag){
+    __u32 d_addr=0;
+    read_lock_bh(&prip_config.rwlock);
+    if(prip_config.valid <= 0||(atomic_read(&prip_config.reference)<=0)){
+        read_unlock_bh(&prip_config.rwlock);
+        return 0;
+    }else{
+        if(atomic_read(&prip_config.reference) > 0){
+            if(flag){
+                if(prip_config.net_one_flag){
+                    d_addr=prip_config.net_one;
+                    read_unlock_bh(&prip_config.rwlock);
+                    return htonl(d_addr);
+                }else{
+                    d_addr=prip_config.net_two;
+                    read_unlock_bh(&prip_config.rwlock);
+                    return htonl(d_addr);
+                }
+            }else{
+                if(prip_config.net_one_flag){
+                    d_addr=prip_config.net_two;
+                    read_unlock_bh(&prip_config.rwlock);
+                    return htonl(d_addr);
+                }else{
+                    d_addr=prip_config.net_one;
+                    read_unlock_bh(&prip_config.rwlock);
+                    return htonl(d_addr);
+                }
+            }
+        }
+    }
+    read_unlock_bh(&prip_config.rwlock);
+    return htonl(d_addr);
+    
+}
+EXPORT_SYMBOL(get_master_or_slave);
+/* 
+ *saddr  is  net byte order ip.
+ *flag :1:master to slave. 0 :slave to master.
+ * the return value: 
+ *                   0 :ip unmatched or prip_config not set.
+ *                   >0: slave ip(net byte order).
+ * */
+//unsigned int master_to_slave(unsigned int master_ip){
+static __u32  __ip_addr_trans(__u32 s_addr){
+    __u32 d_addr=0;		
+    __u32 tmp_ip= 0;
+
+    if(ipv4_is_multicast(s_addr)) 
+	    return s_addr;
+
+    tmp_ip= ntohl(s_addr);
+    read_lock_bh(&prip_config.rwlock);
+    if(prip_config.valid <= 0){
+        read_unlock_bh(&prip_config.rwlock);
+        return 0;
+    }else{
+	if((tmp_ip & prip_config.mask)==prip_config.net_one){
+	    d_addr = prip_config.net_two | (tmp_ip & (~prip_config.mask));
+                        read_unlock_bh(&prip_config.rwlock);
+                        return htonl(d_addr);
+	}
+	else if((tmp_ip & prip_config.mask)==prip_config.net_two)
+	{
+	    d_addr = prip_config.net_one | (tmp_ip & (~prip_config.mask));
+            read_unlock_bh(&prip_config.rwlock);
+            return htonl(d_addr);
+        }else{
+//			if(prip_config.mask > 0){
+//				d_addr = tmp_ip ^ (1 << (32 - prip_config.mask));
+//				read_unlock_bh(&prip_config.rwlock);
+//				return htonl(d_addr);
+//			}else{
+				read_unlock_bh(&prip_config.rwlock);
+            	return 0;
+//			}
+		}
+    }
+}
+/* 
+ *master_ip is  net byte order
+ * the return value: 
+ *                   0 :ip unmatched or prip_config not set.
+ *                   >0: slave ip(net byte order).
+ * */
+__u32  master_to_slave(__u32 master_ip){
+    return __ip_addr_trans(master_ip);
+}
+EXPORT_SYMBOL(master_to_slave);
+/* 
+ * slave_ip is  net byte order
+ * the return value: 
+ *                   0 :ip unmatched or prip_config not set.
+ *                   >0: master ip(net byte order).
+ * */
+__u32 slave_to_master(__u32 slave_ip){
+    return __ip_addr_trans(slave_ip);
+}
+EXPORT_SYMBOL(slave_to_master);
+/*
+ *stat : 1 to up ;0 to down
+ * */
+void set_master_stat(struct prip_priv *q,__u32 stat){
+    if(stat > 0)
+        atomic_set(&q->master_status,1);
+    else
+        atomic_set(&q->master_status,0);
+}
+EXPORT_SYMBOL(set_master_stat);
+/*
+ *stat : 1 to up ;0 to down
+ * */
+void set_slave_stat(struct prip_priv *q,__u32 stat){
+    if(stat > 0)
+        atomic_set(&q->slave_status,1);
+    else
+        atomic_set(&q->slave_status,0);
+}
+EXPORT_SYMBOL(set_slave_stat);
+void master_send_inc(struct prip_priv *q){
+    atomic64_inc(&q->master_send_num);
+    if(atomic64_read(&q->master_send_num)==0){
+        atomic64_set(&q->master_recv_num,0);
+        atomic64_set(&q->slave_send_num,0);
+        atomic64_set(&q->slave_recv_num,0);
+    }
+}
+EXPORT_SYMBOL(master_send_inc);
+void master_recv_inc(struct prip_priv *q){
+    atomic64_inc(&q->master_recv_num);
+    if(atomic64_read(&q->master_recv_num)==0){
+        atomic64_set(&q->master_send_num,0);
+        atomic64_set(&q->slave_send_num,0);
+        atomic64_set(&q->slave_recv_num,0);
+    }
+}
+EXPORT_SYMBOL(master_recv_inc);
+void slave_send_inc(struct prip_priv *q){
+    atomic64_inc(&q->slave_send_num);
+    if(atomic64_read(&q->slave_send_num)==0){
+        atomic64_set(&q->master_send_num,0);
+        atomic64_set(&q->master_recv_num,0);
+        atomic64_set(&q->slave_recv_num,0);
+    }
+}
+EXPORT_SYMBOL(slave_send_inc);
+void slave_recv_inc(struct prip_priv *q){
+    atomic64_inc(&q->slave_recv_num);
+    if(atomic64_read(&q->slave_recv_num)==0){
+        atomic64_set(&q->master_send_num,0);
+        atomic64_set(&q->slave_send_num,0);
+        atomic64_set(&q->master_recv_num,0);
+    }
+}
+EXPORT_SYMBOL(slave_recv_inc);
+int get_prip_alarm(void){
+    return atomic_read(&prip_alarm);
+}
+EXPORT_SYMBOL(get_prip_alarm);
+int prip_check(u16 seq,int isdup,struct prip_priv* priv,unsigned long start)
+{   
+    int pos = 1 - isdup;
+    unsigned long rcv_time=jiffies;
+    int index=seq>>8;
+    index<<=1;
+    if(isdup) set_slave_stat(priv,1);
+    else
+	    set_master_stat(priv,1);
+    
+    spin_lock(&priv->alarm_lock);
+    priv->link->lostcount[isdup]=0;
+    if(++(priv->link->lostcount[pos]) > get_prip_alarm()){
+	    priv->link->lostcount[pos]=0;
+	    spin_unlock(&priv->alarm_lock);
+	    if(pos) {
+            __u32 saddr,daddr;
+            set_slave_stat(priv,0);
+	    saddr=master_to_slave(priv->localip);
+	    daddr=master_to_slave(priv->peerip);
+            if(saddr && daddr){
+                printk("PRIP warning :The slave network(%u.%u.%u.%u) to  (%u.%u.%u.%u) is already in the Down state.\n", 
+			(ntohl(saddr)&(0xff<<24))>>24,
+			(ntohl(saddr)&(0xff<<16))>>16,
+			(ntohl(saddr)&(0xff<<8))>>8,
+			ntohl(saddr)&0xff,
+                        (ntohl(daddr)&(0xff<<24))>>24,
+                        (ntohl(daddr)&(0xff<<16))>>16,
+                        (ntohl(daddr)&(0xff<<8))>>8,
+                        ntohl(daddr)&0xff);
+            }else
+                printk("PRIP warning :The slave network is already in the Down state.\n");
+        }   
+	    else{ 
+            __u32 saddr,daddr;
+            set_master_stat(priv,0);
+	    saddr=priv->localip;
+	    daddr=priv->peerip;
+            if(saddr&&daddr){
+                printk("PRIP warning :The master network (%u,%u.%u,%u) to (%u.%u.%u.%u) is already in the Down state.\n",
+                        (ntohl(saddr)&(0xff<<24))>>24,
+                        (ntohl(saddr)&(0xff<<16))>>16,
+                        (ntohl(saddr)&(0xff<<8))>>8,
+                        ntohl(saddr)&0xff,
+			(ntohl(daddr)&(0xff<<24))>>24,
+                        (ntohl(daddr)&(0xff<<16))>>16,
+                        (ntohl(daddr)&(0xff<<8))>>8,
+                        ntohl(daddr)&0xff);
+            }else
+                printk("PRIP warning :The master network is already in the Down state.\n");
+        }
+    }
+    else
+	 spin_unlock(&priv->alarm_lock);
+ 
+ 
+    spin_lock(&priv->seqnr_in_lock);
+    if((priv->link->clear_map[index]>rcv_time)||(rcv_time-priv->link->clear_map[index]>prip_reboot)){
+	    priv->link->clear_map[index+1]=0;
+    }
+    priv->link->clear_map[index]=rcv_time;
+    if(seq<32768){
+	if(start>priv->link->clear_map[index+1]){
+	    priv->link->clear_map[index+1]=start;
+            memset(&priv->link->seq_in_top[seq>>3],0,32);
+	}
+	if(start<priv->link->clear_map[index+1]){
+	    spin_unlock(&priv->seqnr_in_lock);
+            return 1;
+	}
+        if(priv->link->seq_in_top[seq>>3]&(1<<(seq&7))){
+	    spin_unlock(&priv->seqnr_in_lock);
+	    return 1;
+	}
+        else{
+	    priv->link->seq_in_top[seq>>3]|=(1<<(seq&7));
+	    spin_unlock(&priv->seqnr_in_lock);
+	    return 0;
+	}
+    }
+    else{	
+	seq-=32768;
+	if(start>priv->link->clear_map[index+1]){
+	    priv->link->clear_map[index+1]=start;
+            memset(&priv->link->seq_in_bottom[seq>>3],0,32);
+	}
+	if(start<priv->link->clear_map[index+1]){
+	    spin_unlock(&priv->seqnr_in_lock);
+            return 1;
+	}
+ 	if(priv->link->seq_in_bottom[seq>>3]&(1<<(seq&7))){
+	    spin_unlock(&priv->seqnr_in_lock);
+	    return 1;
+	}
+	else{
+	    priv->link->seq_in_bottom[seq>>3]|=(1<<(seq&7));
+	    spin_unlock(&priv->seqnr_in_lock);
+	    return 0;
+	}
+    }
+}
+
+EXPORT_SYMBOL(prip_check);
+
+int check_prip_net(__u32 addr)
+{
+	//printk("%s,%s,%d prip_net_one:(%u.%u.%u.%u)\n", __FILE__, __FUNCTION__, __LINE__, (ntohl(prip_net_one)&(0xff<<24))>>24, (ntohl(prip_net_one)&(0xff<<16))>>16, (ntohl(prip_net_one)&(0xff<<8))>>8, ntohl(prip_net_one)&0xff);
+	//printk("%s,%s,%d prip_net_two:(%u.%u.%u.%u)\n", __FILE__, __FUNCTION__, __LINE__, (ntohl(prip_net_two)&(0xff<<24))>>24, (ntohl(prip_net_two)&(0xff<<16))>>16, (ntohl(prip_net_two)&(0xff<<8))>>8, ntohl(prip_net_two)&0xff);
+	//printk("%s,%s,%d checkaddr(%u.%u.%u.%u)\n", __FILE__, __FUNCTION__, __LINE__, (ntohl(addr)&(0xff<<24))>>24, (ntohl(addr)&(0xff<<16))>>16, (ntohl(addr)&(0xff<<8))>>8, ntohl(addr)&0xff);
+
+	if( (((ntohl(addr)&(0xff<<24))>>24) == (ntohl(prip_net_one)&0xff))  || (((ntohl(addr)&(0xff<<24))>>24) == (ntohl(prip_net_two)&0xff)) ){
+		if( (((ntohl(addr)&(0xff<<16))>>16) == ((ntohl(prip_net_one)&(0xff<<8))>>8))  || (((ntohl(addr)&(0xff<<16))>>16) == ((ntohl(prip_net_two)&(0xff<<8))>>8)) ){
+			if( (((ntohl(addr)&(0xff<<8))>>8) == ((ntohl(prip_net_one)&(0xff<<16))>>16)) || (((ntohl(addr)&(0xff<<8))>>8) == ((ntohl(prip_net_two)&(0xff<<16))>>16)) ){
+				//if( ((ntohl(addr)&0xff) == (ntohl(prip_net_one)&0xff)) || ((ntohl(addr)&0xff) == (ntohl(prip_net_two)&0xff)) ){
+				//	return 0;	
+				//}
+				//printk("inputipok\n");
+				return 0;
+			}else{
+				return 1;
+			}
+		}else{
+			return 1;
+		}
+	}else{
+		return 1;
+	}
+
+#if 0
+
+	if(((ntohl(addr)&(0xff<<24))>>24) == ((ntohl(prip_net_two)&(0xff<<24))>>24)){
+		if(((ntohl(addr)&(0xff<<16))>>16) == ((ntohl(prip_net_two)&(0xff<<16))>>16)){
+			if(((ntohl(addr)&(0xff<<8))>>8) == ((ntohl(prip_net_two)&(0xff<<8))>>8)){
+				if((ntohl(addr)&0xff) == (ntohl(prip_net_two)&0xff)){
+					return 0;	
+				}
+			}else{
+				return 1;
+			}
+		}else{
+			return 1;
+		}
+	}else{
+		return 1;
+	}
+#endif
+}
+EXPORT_SYMBOL(check_prip_net);
+
+static int __init init_prip(void) 
+{
+    int err;
+    int i;
+
+    memset(&prip_config,0,sizeof(PRIP_CONFIG_T));
+    memset(config_buff,0,BUFF_SIZE);
+    atomic_set(&(prip_config.reference),0);
+    atomic_set(&prip_netmask,0);
+    rwlock_init(&(prip_config.rwlock));
+    atomic_set(&prip_alarm,500);
+    atomic_set(&prip_cache_timeout,1);
+    for(i=0;i<PRIP_HASHSZ;i++){
+        prip_hash[i].head.first=NULL;
+        rwlock_init(&(prip_hash[i].rwlock));
+    }
+    prip_reboot=msecs_to_jiffies(10000);
+    prip_single_list.head.first=NULL;
+    rwlock_init(&prip_single_list.rwlock);
+    get_random_bytes(&jhash_prip_initval,sizeof(jhash_prip_initval));
+
+    dir_prip = proc_mkdir("prip",NULL);
+    if(!dir_prip){
+        printk("PRIP ERROR: Cannot create /proc/prip .\n");
+        err = -1;
+        goto err_1;
+    }
+    prip_config_entry = proc_create("prip_config",S_IRUGO|S_IWUSR,dir_prip, &prip_config_ops);
+    if(!prip_config_entry){
+        printk("PRIP ERROR: Cannot create /proc/prip/prip_config .\n");
+        err = -1;
+        goto err_2;
+    }
+/*    prip_config_entry->read_proc = read_prip_config;
+    prip_config_entry->write_proc = write_prip_config;
+    prip_config_entry->data = config_buff;
+*/
+    prip_status_entry = proc_create("prip_state",S_IRUGO,dir_prip, &prip_status_ops);
+    if(!prip_status_entry){
+        printk("PRIP ERROR: Cannot create /proc/prip/prip_state .\n");
+        err = -1;
+        goto err_3;
+    }
+   // prip_status_entry->proc_fops = &prip_status_ops;
+
+    prip_alarm_entry = proc_create("prip_alarm",S_IRUGO|S_IWUSR,dir_prip, &prip_alarm_ops);
+    if(!prip_alarm_entry){
+        printk("PRIP ERROR: Cannot create /proc/prip/prip_alarm .\n");
+        err = -1;
+        goto err_4;
+    }
+/*    prip_alarm_entry->read_proc = read_prip_alarm;
+    prip_alarm_entry->write_proc = write_prip_alarm; */
+    prip_cache_timeout_entry = proc_create("prip_cache_timeout",S_IRUGO|S_IWUSR,dir_prip,&prip_cache_timeout_ops);
+    if(!prip_cache_timeout_entry) {
+        printk("PRIP ERROR: Cannot create /proc/prip/prip_cache_timeout .\n");
+        err = -1;
+        goto err_5;
+    }
+//    prip_cache_timeout_entry->read_proc = read_prip_cache_timeout;
+ //   prip_cache_timeout_entry->write_proc = write_prip_cache_timeout;
+
+    printk("PRIP modules insmod success.\n");
+    return 0;
+err_5:
+    remove_proc_entry("prip_alarm",dir_prip);
+err_4:
+    remove_proc_entry("prip_state",dir_prip);
+err_3:
+    remove_proc_entry("prip_config",dir_prip);
+err_2:
+    remove_proc_entry("prip",NULL);
+err_1:
+    return err;
+}
+static void __exit exit_prip(void){
+    remove_proc_entry("prip_cache_timeout",dir_prip);
+    remove_proc_entry("prip_alarm",dir_prip);
+    remove_proc_entry("prip_state",dir_prip);
+    remove_proc_entry("prip_config",dir_prip);
+    remove_proc_entry("prip",NULL);
+
+}
+MODULE_LICENSE("GPL");
+MODULE_VERSION("1.0");
+
+module_init(init_prip);
+module_exit(exit_prip);
