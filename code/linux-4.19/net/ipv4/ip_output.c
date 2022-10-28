@@ -80,6 +80,9 @@
 #include <linux/netfilter_bridge.h>
 #include <linux/netlink.h>
 #include <linux/tcp.h>
+#ifdef CONFIG_PRIP
+#include <net/prip.h>
+#endif
 
 static int
 ip_fragment(struct net *net, struct sock *sk, struct sk_buff *skb,
@@ -422,6 +425,242 @@ static void ip_copy_addrs(struct iphdr *iph, const struct flowi4 *fl4)
 	       sizeof(fl4->saddr) + sizeof(fl4->daddr));
 }
 
+#ifdef CONFIG_PRIP
+int ip_queue_xmit_prip(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
+{
+	struct inet_sock *inet = inet_sk(sk);
+	struct net *net = sock_net(sk);
+	struct ip_options_rcu *inet_opt;
+	struct flowi4 *fl4;
+	struct rtable *rt,*duprt;
+	struct iphdr *iph;
+	int linx_rt_flag=0;
+
+	int ret = -EHOSTUNREACH;
+
+	bool route = true;
+	__be32 daddr;
+	__be32 dupdaddr = 0;
+	struct prip_priv *priv = NULL;
+	struct sk_buff *dupskb = NULL;
+	unsigned char *pointer = NULL;
+
+	/* Skip all of this if the packet is already routed,
+	 * f.e. by something like SCTP.
+	 */
+	inet_opt = rcu_dereference(inet->inet_opt);
+	fl4 = &fl->u.ip4;
+	if(inet_opt->opt.prip == 1) {
+		kfree_skb(skb);
+	    	return -EHOSTUNREACH;
+	}
+	daddr = inet->inet_daddr;
+	dupdaddr = master_to_slave(daddr);
+	if(dupdaddr == 0) {
+		kfree_skb(skb);
+	    	return -EHOSTUNREACH;
+	}
+	rt = skb_rtable(skb);
+/*	if(rt && (daddr != rt->rt_gateway)) {
+		dst_release(skb->_skb_refdst);
+		skb->_skb_refdst = NULL;
+		rt = NULL;
+	}*/
+	if (rt)
+		goto packet_routed_prip;
+
+	/* Make sure we can route this packet. */
+	rt = (struct rtable *)__sk_dst_check(sk, 0);
+/*	if (rt && (daddr != rt->rt_gateway)) {
+		__sk_dst_set(sk, NULL);
+		rt = NULL;
+	}*/
+	if (!rt) {
+		/* Use correct destination address if we have options. */
+		if (inet_opt && inet_opt->opt.srr)
+			daddr = inet_opt->opt.faddr;
+
+		/* If this fails, retransmit mechanism of transport layer will
+		 * keep trying until route appears or the connection times
+		 * itself out.
+		 */
+		rt = ip_route_output_ports(net, fl4, sk,
+					   daddr, inet->inet_saddr,
+					   inet->inet_dport,
+					   inet->inet_sport,
+					   sk->sk_protocol,
+					   RT_CONN_FLAGS(sk),
+					   sk->sk_bound_dev_if);
+		linx_rt_flag=1;
+		if (IS_ERR(rt)) {
+			route = false;
+			goto dup_send;
+		}
+	/*	if(daddr != (rt->rt_gateway)) {
+			ip_rt_put(rt);
+			route = false;
+			goto dup_send;
+		}*/
+		sk_setup_caps(sk, &rt->dst);
+	}
+	skb_dst_set_noref(skb, &rt->dst);
+
+packet_routed_prip:
+	if (inet_opt && inet_opt->opt.is_strictroute && rt->rt_uses_gateway)
+		goto no_route_prip;
+
+	/* OK, we know where to send it, allocate and build IP header. */
+	skb_push(skb, sizeof(struct iphdr) + (inet_opt ? inet_opt->opt.optlen : 0));
+	skb_reset_network_header(skb);
+	iph = ip_hdr(skb);
+	*((__be16 *)iph) = htons((4 << 12) | (5 << 8) | (inet->tos & 0xff));
+	if (ip_dont_fragment(sk, &rt->dst) && !skb->ignore_df)
+		iph->frag_off = htons(IP_DF);
+	else
+		iph->frag_off = 0;
+	iph->ttl      = ip_select_ttl(inet, &rt->dst);
+	iph->protocol = sk->sk_protocol;
+//	ip_copy_addrs(iph, fl4);
+	iph->saddr = inet->inet_saddr;
+	iph->daddr = daddr;
+
+	/* Transport layer set skb->h.foo itself. */
+
+	if (inet_opt && inet_opt->opt.optlen) {
+		iph->ihl += inet_opt->opt.optlen >> 2;
+		ip_options_build(skb, &inet_opt->opt, inet->inet_daddr, rt, 0);
+	}
+
+	ip_select_ident_segs(net, skb, sk,
+			     skb_shinfo(skb)->gso_segs ?: 1);
+
+	/* TODO : should we use skb->sk here instead of sk ? */
+	skb->priority = sk->sk_priority;
+	skb->mark = sk->sk_mark;
+dup_send:
+	if (route) {
+		iph = ip_hdr(skb);
+
+		if (!sk->priv) {
+			priv = prip_priv_find(iph->saddr, iph->daddr);
+			if (!priv) {
+				kfree_skb(skb);
+				return -ENOMEM;
+			}
+			sk->priv = priv;
+		} else
+			priv = sk->priv;
+	}
+	if (in_interrupt())
+		dupskb = skb_copy(skb, GFP_ATOMIC);
+	else
+		dupskb = skb_copy(skb, GFP_KERNEL);
+
+	if (route) {
+		ret = ip_local_out(net,sk,skb);
+		if (!ret) 
+			master_send_inc(priv);
+	}
+	if (!dupskb) 
+		goto no_opt;
+
+	dupskb->destructor = NULL;
+//printk("xmit_prip:dst_release !!!\n");
+//	dst_release(skb_dst(dupskb));
+	dupskb -> _skb_refdst = 0;
+
+	duprt = (struct rtable *)(sk->sk_dup_dst_cache);
+	if (!duprt || linx_rt_flag) {
+		duprt = ip_route_output_ports(net, fl4, sk,
+					   dupdaddr, 0,
+					   inet->inet_dport,
+					   inet->inet_sport,
+					   sk->sk_protocol,
+					   RT_CONN_FLAGS(sk),
+					   0);
+		if (IS_ERR(duprt)) {
+			kfree_skb(dupskb);
+			dupskb = NULL;
+			goto no_opt;
+		}/*
+		if (dupdaddr != duprt->rt_gateway) {
+			ip_rt_put(duprt);
+			kfree_skb(dupskb);
+			dupskb = NULL;
+			goto no_opt;
+		}*/
+		sk->sk_dup_dst_cache = &duprt->dst;
+	}
+	skb_dst_set(dupskb, dst_clone(&duprt->dst));
+	if (!route) {
+		skb_push(dupskb, sizeof(struct iphdr) + (inet_opt ? inet_opt->opt.optlen : 0));
+		skb_reset_network_header(dupskb);
+	}
+	iph = ip_hdr(dupskb);
+	if (!route)
+		*((__be16 *)iph) = htons((4 << 12) | (5 << 8) | (inet->tos & 0xff));
+	if (ip_dont_fragment(sk, &duprt->dst) && !skb->ignore_df)
+		iph->frag_off = htons(IP_DF);
+	else
+		iph->frag_off = 0;
+
+	iph->ttl      = ip_select_ttl(inet, &duprt->dst);
+	ip_copy_addrs(iph,fl4);
+	//iph->saddr = inet->inet_saddr;
+	//iph->daddr = dupdaddr;
+
+	/* Transport layer set skb->h.foo itself. */
+	if (!route) {
+		if (!sk->priv) {
+			priv = prip_priv_find(iph->saddr, slave_to_master(iph->daddr));
+			if (!priv) {
+				kfree_skb(skb);
+				kfree_skb(dupskb);
+				return -ENOMEM;
+			}
+			sk->priv = priv;
+		} else
+			priv = sk->priv;
+	}
+	pointer = (unsigned char *)iph;
+	if (!route) {
+		iph->protocol = sk->sk_protocol;
+		if (inet_opt && inet_opt->opt.optlen) {
+			iph->ihl += inet_opt->opt.optlen >> 2;
+			ip_options_build(dupskb, &inet_opt->opt, inet->inet_daddr, duprt, 0);
+		}
+	}
+
+	memset(pointer+inet_opt->opt.prip+pointer[inet_opt->opt.prip+2]+sizeof(unsigned long)+sizeof(__be16)-1, 1, 1);
+	ip_select_ident_segs(net,skb,sk,skb_shinfo(skb)->gso_segs ?: 1);
+
+	dupskb->priority = sk->sk_priority;
+	dupskb->mark = sk->sk_mark;
+	iph->saddr = master_to_slave(inet->inet_saddr);	//linx add
+no_opt:
+	if (!route && !dupskb)
+		goto no_route_prip;
+	if (dupskb) {
+		int ret2 = ip_local_out(net,sk,dupskb);
+		if (!ret2) {
+			ret = ret2;
+			slave_send_inc(priv);
+		}
+		if (!route) {
+			kfree_skb(skb);
+			ret = ret2;
+		}
+	}
+	rcu_read_unlock();
+	return ret;
+no_route_prip:
+	rcu_read_unlock();
+	IP_INC_STATS(net, IPSTATS_MIB_OUTNOROUTES);
+	kfree_skb(skb);
+	return -EHOSTUNREACH;
+}
+#endif
+
 /* Note: skb->sk can be different from sk, in case of tunnels */
 int __ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl,
 		    __u8 tos)
@@ -433,13 +672,33 @@ int __ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl,
 	struct rtable *rt;
 	struct iphdr *iph;
 	int res;
-
+#ifdef CONFIG_PRIP
+	__be32 daddr = inet->inet_daddr;
+#endif
 	/* Skip all of this if the packet is already routed,
 	 * f.e. by something like SCTP.
 	 */
 	rcu_read_lock();
 	inet_opt = rcu_dereference(inet->inet_opt);
 	fl4 = &fl->u.ip4;
+
+#ifdef CONFIG_PRIP
+	if (inet_opt && inet_opt->opt.prip && (sk->sk_protocol == IPPROTO_TCP || sk->sk_protocol == IPPROTO_UDP) && (daddr != htonl(INADDR_LOOPBACK))) {
+		if(check_prip_net(daddr)){
+			goto normal_routine;
+		}
+		res = ip_queue_xmit_prip(sk, skb, fl);
+		rcu_read_unlock();
+		return res;
+	}
+	if (inet_opt && inet_opt->opt.prip) {
+		memset(inet_opt->opt.__data + inet_opt->opt.prip - sizeof(struct iphdr), IPOPT_NOP, 14);
+		inet_opt->opt.prip = 0;
+	}
+
+normal_routine:
+#endif
+
 	rt = skb_rtable(skb);
 	if (rt)
 		goto packet_routed;
@@ -1341,6 +1600,261 @@ static void ip_cork_release(struct inet_cork *cork)
 	cork->dst = NULL;
 }
 
+#ifdef CONFIG_PRIP
+int ip_push_pending_frames_prip(struct sock *sk, struct flowi4 *fl4)
+{
+    	struct sk_buff_head *queue = &sk->sk_write_queue;
+	struct sk_buff *skb, *tmp_skb;
+	struct sk_buff **tail_skb;
+	struct inet_sock *inet = inet_sk(sk);
+	struct inet_cork *cork = &(inet->cork.base);
+	struct net *net = sock_net(sk);
+	struct ip_options *opt = NULL;
+
+	struct rtable *rt = (struct rtable *)cork->dst;
+	struct rtable *duprt;
+	struct iphdr *iph;
+	bool ismc = false;
+	__be16 df = 0;
+	__u8 ttl;
+	__be32 mcsaddr = 0, cdaddr;
+	__be32 gateway;
+
+	int err = 1,err2;
+	struct prip_priv *priv = NULL;
+	unsigned char isdup;
+	__be32 dupdaddr, daddr;
+	struct sk_buff *dupskb = NULL;
+	__be32 saddr = fl4->saddr; //lcw
+	unsigned char *pointer = NULL;
+
+	opt = inet->cork.base.opt;
+	daddr = fl4->daddr; //lcw
+	
+	if (ipv4_is_multicast(daddr))
+		ismc = true;
+
+	skb = __skb_dequeue(queue);
+	if (!skb)
+		goto out;
+	tail_skb = &(skb_shinfo(skb)->frag_list);
+
+	/* move skb->data to ip header from ext header */
+	if (skb->data < skb_network_header(skb))
+		__skb_pull(skb, skb_network_offset(skb));
+	while ((tmp_skb = __skb_dequeue(queue)) != NULL) {
+		__skb_pull(tmp_skb, skb_network_header_len(skb));
+		*tail_skb = tmp_skb;
+		tail_skb = &(tmp_skb->next);
+		skb->len += tmp_skb->len;
+		skb->data_len += tmp_skb->len;
+		skb->truesize += tmp_skb->truesize;
+		tmp_skb->destructor = NULL;
+		tmp_skb->sk = NULL;
+	}
+	if (opt->prip == 1) {
+		kfree_skb(skb);
+		ip_cork_release(cork);
+		return 0;
+	}
+	pointer = opt->__data;
+	memcpy(&isdup, pointer+opt->prip+pointer[opt->prip+2-sizeof(struct iphdr)]+sizeof(unsigned long)-1+sizeof(__be16)-sizeof(struct iphdr), sizeof(unsigned char));
+	if (!isdup) 
+		dupdaddr = master_to_slave(daddr);
+	else {
+		dupdaddr = daddr;
+		daddr = slave_to_master(daddr);
+	}
+	if (!dupdaddr || !daddr) {
+		kfree_skb(skb);
+		ip_cork_release(cork);
+		return -EHOSTUNREACH;
+	}
+	cdaddr = dupdaddr;
+	gateway = rt->rt_gateway;
+	if (sk->sk_protocol == IPPROTO_UDP) {
+		if ((!inet->inet_saddr || ismc) && isdup)
+		{
+			saddr = slave_to_master(saddr);
+		}
+	}
+	priv = prip_priv_find(saddr, daddr);
+	if (!priv) {
+		kfree_skb(skb);
+		ip_cork_release(cork);
+		return -ENOMEM;
+	}
+	/* Unless user demanded real pmtu discovery (IP_PMTUDISC_DO), we allow
+	 * to fragment the frame generated here. No matter, what transforms
+	 * how transforms change size of the packet, it will come out.
+	 */
+	skb->ignore_df = ip_sk_ignore_df(sk);
+
+	/* DF bit is set when we want to see DF on outgoing frames.
+	 * If ignore_df is set too, we still allow to fragment this frame
+	 * locally. */
+	iph = ip_hdr(skb);
+	iph->version = 4;
+	iph->ihl = 5;
+	iph->tos = (cork->tos != -1) ? cork->tos : inet->tos;
+	iph->protocol = sk->sk_protocol;
+	//ip_copy_addrs(iph, fl4);
+	iph->saddr = saddr;
+	iph->daddr = daddr;
+	ip_select_ident(net, skb, sk);
+
+	if (opt) {
+		iph->ihl += opt->optlen>>2;
+		ip_options_build(skb, opt, daddr, rt, 0);
+	}
+	skb->priority = (cork->tos != -1) ? cork->priority: sk->sk_priority;
+	skb->mark = sk->sk_mark;
+
+	if (in_interrupt())
+		dupskb = skb_copy(skb,GFP_ATOMIC);
+	else
+		dupskb = skb_copy(skb,GFP_KERNEL);
+	
+	if (!dupskb && isdup)
+		err = -ENOMEM;
+	if(dupskb) 
+		skb_set_owner_w(dupskb,sk);
+	if (isdup) {
+		duprt = ip_route_output_ports(net, fl4, sk,
+				   daddr, saddr,
+				   fl4->fl4_dport,fl4->fl4_sport,
+				   sk->sk_protocol,
+				   RT_CONN_FLAGS(sk), 0);
+		if (IS_ERR(rt)) {
+			kfree_skb(skb);
+			goto dupsend;
+		}/*
+		if(daddr != duprt->rt_gateway) {
+			ip_rt_put(duprt);
+			kfree_skb(skb);
+			goto dupsend;
+		}*/
+		if (inet->pmtudisc == IP_PMTUDISC_DO || inet->pmtudisc == IP_PMTUDISC_PROBE ||
+	    		(skb->len <= dst_mtu(&duprt->dst) &&
+	     		ip_dont_fragment(sk, &duprt->dst)))
+			df = htons(IP_DF);
+		if (cork->ttl != 0)
+			ttl = cork->ttl;
+		else if (duprt->rt_type == RTN_MULTICAST)
+			ttl = inet->mc_ttl;
+		else
+			ttl = ip_select_ttl(inet, &duprt->dst);
+
+		iph->frag_off = df;
+		ip_select_ident(net, skb, sk);
+		iph->ttl = ttl;
+		skb_dst_set(skb, &duprt->dst);
+	} else {
+		if (inet->pmtudisc == IP_PMTUDISC_DO || inet->pmtudisc == IP_PMTUDISC_PROBE ||
+	    		(skb->len <= dst_mtu(&rt->dst) &&
+	     		ip_dont_fragment(sk, &rt->dst)))
+			df = htons(IP_DF);
+		if (cork->ttl != 0)
+			ttl = cork->ttl;
+		else if (rt->rt_type == RTN_MULTICAST)
+			ttl = inet->mc_ttl;
+		else
+			ttl = ip_select_ttl(inet, &rt->dst);
+
+		iph->frag_off = df;
+		ip_select_ident(net, skb, sk);
+		iph->ttl = ttl;
+		cork->dst = NULL;
+		skb_dst_set(skb, &rt->dst);
+	}
+	err = ip_local_out(net,skb->sk,skb); 
+	if(!err)
+	{
+		master_send_inc(priv);
+	}
+dupsend:
+	if (dupskb) {
+		iph = (struct iphdr *)dupskb->data;
+		if (!isdup) {
+			if(ismc)
+				mcsaddr = master_to_slave(saddr);
+			else
+				mcsaddr = saddr;
+			duprt = ip_route_output_ports(net, fl4, sk,
+					   cdaddr, mcsaddr, fl4->fl4_dport, fl4->fl4_sport,
+					   sk->sk_protocol, RT_CONN_FLAGS(sk), 0);
+			if (IS_ERR(duprt)) {
+				kfree_skb(dupskb);
+				dupskb = NULL;
+				goto out;
+			}/*
+			if (dupdaddr != duprt->rt_gateway) {
+				ip_rt_put(duprt);
+				kfree_skb(dupskb);
+				dupskb = NULL;
+				goto out;
+			}*/
+			if (inet->pmtudisc == IP_PMTUDISC_DO || inet->pmtudisc == IP_PMTUDISC_PROBE ||
+	    			(dupskb->len <= dst_mtu(&duprt->dst) &&
+	     			ip_dont_fragment(sk, &duprt->dst)))
+				df = htons(IP_DF);
+
+			if (cork->ttl != 0)
+				ttl = cork->ttl;
+			else if (duprt->rt_type == RTN_MULTICAST)
+				ttl = inet->mc_ttl;
+			else
+				ttl = ip_select_ttl(inet, &duprt->dst);
+
+			iph->frag_off = df;
+			ip_select_ident(net, dupskb, sk);
+			iph->ttl = ttl;
+			skb_dst_set(dupskb, &duprt->dst);
+		} else {
+			cork->dst = NULL;
+			skb_dst_set(dupskb, &rt->dst);
+			if (inet->pmtudisc == IP_PMTUDISC_DO || inet->pmtudisc == IP_PMTUDISC_PROBE ||
+	    			(skb->len <= dst_mtu(&rt->dst) &&
+	     			ip_dont_fragment(sk, &rt->dst)))
+				df = htons(IP_DF);
+			if (cork->ttl != 0)
+				ttl = cork->ttl;
+			else if (rt->rt_type == RTN_MULTICAST)
+				ttl = inet->mc_ttl;
+			else
+				ttl = ip_select_ttl(inet, &rt->dst);
+
+			iph->frag_off = df;
+			ip_select_ident(net, dupskb, sk);
+			iph->ttl = ttl;
+		}
+		//iph->saddr = master_to_slave(saddr);
+		iph->daddr = dupdaddr;
+		pointer = (unsigned char *)iph;
+		memset(pointer + opt->prip + pointer[opt->prip+2] + sizeof(unsigned long) + sizeof(__be16)-1, 1, 1);
+
+		err2 = ip_local_out(net,dupskb->sk,dupskb);
+		if(!err2) {
+			err = err2;
+			slave_send_inc(priv);
+		}
+	}
+	if (err) {
+		if(err>0)
+			err = net_xmit_errno(err);
+		if(err)
+			goto error;
+	}
+out:
+	prip_priv_put(priv);
+	ip_cork_release(cork);
+	return err;
+error:
+	IP_INC_STATS(net, IPSTATS_MIB_OUTDISCARDS);
+	goto out;	
+}
+#endif
+
 /*
  *	Combined all pending IP fragments on the socket as one IP datagram
  *	and push them out.
@@ -1396,6 +1910,15 @@ struct sk_buff *__ip_make_skb(struct sock *sk,
 
 	if (cork->flags & IPCORK_OPT)
 		opt = cork->opt;
+
+
+#ifdef CONFIG_PRIP
+	if (opt && opt->prip) {
+		memset(opt->__data+opt->prip-sizeof(struct iphdr), IPOPT_NOP, 14);
+		opt->prip = 0;
+	}
+#endif
+
 
 	if (cork->ttl != 0)
 		ttl = cork->ttl;
@@ -1456,6 +1979,22 @@ int ip_send_skb(struct net *net, struct sk_buff *skb)
 int ip_push_pending_frames(struct sock *sk, struct flowi4 *fl4)
 {
 	struct sk_buff *skb;
+
+#ifdef CONFIG_PRIP
+	struct inet_sock *inet = inet_sk(sk);
+	struct ip_options *opt = NULL;
+
+	if (inet->cork.base.flags & IPCORK_OPT)
+		opt = inet->cork.base.opt;
+
+	if (opt && opt->prip && (sk->sk_protocol == IPPROTO_TCP || sk->sk_protocol == IPPROTO_UDP) && (inet->inet_daddr != htonl(INADDR_LOOPBACK)))
+		return ip_push_pending_frames_prip(sk,fl4);
+	if (opt && opt->prip) {
+		memset(opt->__data+opt->prip-sizeof(struct iphdr), IPOPT_NOP, 14);
+		opt->prip = 0;
+	}
+#endif
+
 
 	skb = ip_finish_skb(sk, fl4);
 	if (!skb)
@@ -1550,6 +2089,9 @@ void ip_send_unicast_reply(struct sock *sk, struct sk_buff *skb,
 	struct sk_buff *nskb;
 	int err;
 	int oif;
+#ifdef CONFIG_PRIP
+	unsigned char *pointer = NULL;
+#endif
 
 	if (__ip_options_echo(net, &replyopts.opt.opt, skb, sopt))
 		return;
