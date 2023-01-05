@@ -2448,27 +2448,27 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端主从链路捕包情况如下：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsZgXwxb.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片292.png)
 
 图4.4.6-1 客户端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpskGPKzM.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片293.png)
 
 图4.4.6-2 客户端从链路捕包截图
 
 客户端应用程序运行状态如下所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpswl00Bn.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片294.png)
 
 图4.4.6-3 客户端应用程序运行状态
 
 服务端主从链路捕包情况如下所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpscUziEY.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片295.png)
 
 图4.4.6-4 服务端从链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsYryCGz.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片296.png)
 
 图4.4.7-5 服务端从链路捕包截图
 
