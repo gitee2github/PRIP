@@ -429,17 +429,17 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 首先查看服务器端PRIP的状态，此时没有应用程序使用PRIP，那么其状态显示为off，如图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsuYVWJd.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片26.png)
 
 图4.25 测试前服务器PRIP的状态
 
 客户端启用应用程序发送SYN包后，服务器端主从链路的捕包情况如下两图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpskUUzCO.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片27.png)
 
 图4.26 服务器主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsuEFevp.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片28.png)
 
 图4.27 服务器从链路捕包截图
 
@@ -447,7 +447,7 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 服务器收到SYN发送RST后，服务器端的PRIP状态如下所示，此时系统的PRIP仍未启动，但是此时系统仍具有对端IP的PRIP缓存，PRIP缓存中记录了主从链路的收发包的个数。
 
-![img](file:////tmp/wps-rocky/ksohtml/wps4TgVn0.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片29.png)
 
 图4.28 服务器收到包后的PRIP状态
 
