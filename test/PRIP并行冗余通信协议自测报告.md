@@ -1517,13 +1517,13 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 首先使用ifconfig命令查看客户端和服务器端主从链路网卡状态，如以下两图所示。
 
-![img](file:////tmp/wps-rocky/ksohtml/wps2sEO1N.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片164.png)
 
 图4.4.3-1 客户端主从链路网卡状态
 
 由上图可知，客户端主链路网卡被down掉了，从链路网卡处于up状态。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsAcBiZo.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片165.png)
 
 图4.4.3-2 服务端主从链路网卡状态
 
@@ -1533,25 +1533,25 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端的主从链路的捕包情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsorPOWZ.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片166.png)
 
 图4.4.3-3 客户端主链路网卡捕包情况
 
 由于客户端主链路网卡未处于UP状态，所以主链路网卡不能捕包。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpskAKmUA.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片167.png)
 
 图4.4.3-4 客户端从链路网卡捕包情况
 
 由上图可知，客户端从链路能够正常收发双方通信的从包，从而保证了双方应用程序的正常通信。双方建立连接的情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsTv6WRb.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片168.png)
 
 图4.4.3-5 客户端显示双方连接建立情况
 
 客户端系统PRIP状态显示，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsxahzPM.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片169.png)
 
 图4.4.3-6 客户端系统PRIP状态显示
 
@@ -1559,13 +1559,13 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 服务端主从链路网卡的捕包情况，如下两图所示：
 
- ![img](file:////tmp/wps-rocky/ksohtml/wpswXcdNn.jpg)
+![](../image/PRIP并行冗余通信协议自测报告/图片170.png)
 
 图4.4.3-7 服务端主链路网卡捕包情况
 
 由于客户端主链路网卡处于down状态，所以服务端不会收到客户端发送来的主包。而服务端发送出去的主包由于查找不到下一跳的mac地址，所以服务端发送给客户端的主包也发送不出去，也就捕获不到。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpssxRSKY.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片171.png)
 
 图4.4.3-8 服务端从链路网卡的捕包情况
 
@@ -1573,13 +1573,13 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 服务端显示双方连接建立情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpskp5AIz.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片172.png)
 
 图4.4.3-9 服务端显示双方连接建立的情况
 
 服务端系统的PRIP状态显示，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsz5ilGa.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片173.png)
 
 图4.4.3-10 服务端PRIP状态显示
 
@@ -1589,33 +1589,33 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端主从链路的捕包情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsg9k7DL.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片174.png)
 
 图4.4.3-11 UDP通信时客户端主链路捕包情况
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsOG4UBm.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片175.png)
 
 图4.4.3-12 	UDP通信时客户端从链路捕包情况
 
 客户端系统PRIP状态显示如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsXxiLzX.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片176.png)
 
 图4.4.3-13 客户端系统PRIP状态显示
 
 服务器端主从链路网卡的捕包情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsmPaDxy.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片177.png)
 
 图4.4.3-13 UDP通信时服务端主链路捕包情况
 
-![img](file:////tmp/wps-rocky/ksohtml/wps5l7wv9.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片178.png)
 
 图4.4.3-14 UDP通信时服务端从链路的捕包情况
 
 服务端系统PRIP状态显示如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wps1eJttK.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片179.png)
 
 图4.4.3-15 服务器端PRIP状态显示
 
@@ -1627,13 +1627,13 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 首先使用ifconfig命令查看客户端和服务器端主从链路网卡状态，如以下两图所示。
 
-![img](file:////tmp/wps-rocky/ksohtml/wps3L2rrl.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片180.png)
 
 图4.4.3-16 客户端主从链路网卡状态
 
 由上图可知，客户端从链路网卡处于down状态，主链路网卡处于up状态。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsy5gspW.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片181.png)
 
 图4.4.3-17 服务端主从链路网卡状态
 
@@ -1643,25 +1643,25 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端的主从链路的捕包情况s，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsyrdvnx.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片182.png)
 
 图4.4.3-18 客户端从链路网卡捕包情况
 
 由于客户端从链路网卡处于down状态，所以从链路网卡不能进行数据包收发。
 
-![img](file:////tmp/wps-rocky/ksohtml/wps4TMzl8.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片183.png)
 
 图4.4.3-19 客户端主链路网卡捕包情况
 
 由上图可知，客户端主链路能够正常收发双方通信的从包，从而保证了双方应用程序的正常通信。双方建立连接的情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsEQnHjJ.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片184.png)
 
 图4.4.3-20 客户端显示双方连接建立情况
 
 客户端系统PRIP状态显示，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsSC3Qhk.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片185.png)
 
 图4.4.3-21 客户端系统PRIP状态显示
 
@@ -1669,13 +1669,13 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 服务端主从链路网卡的捕包情况，如下两图所示：
 
- ![img](file:////tmp/wps-rocky/ksohtml/wps0nv2fV.jpg)
+![](../image/PRIP并行冗余通信协议自测报告/图片186.png)
 
 图4.4.3-22 服务端从链路网卡捕包情况
 
 由于客户端从链路处于down状态，所以服务端不会收到客户端发送来的从包。而服务端发送出去的从包由于查找不到下一跳的mac地址，所以服务端发送给客户端的从包也发送不出去，也就捕获不到。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpskWXfew.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片187.png)
 
 图4.4.3-23 服务端主链路网卡的捕包情况
 
@@ -1683,13 +1683,13 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 服务端显示双方连接建立情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wps2J2vc7.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片188.png)
 
 图4.4.3-24 服务端显示双方连接建立的情况
 
 服务端系统的PRIP状态显示，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsaC5NaI.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片189.png)
 
 图4.4.3-25 服务端PRIP状态显示
 
@@ -1699,33 +1699,33 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端主从链路的捕包情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsNRK78i.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片190.png)
 
 图4.4.3-26 UDP通信时客户端从链路捕包情况
 
-![img](file:////tmp/wps-rocky/ksohtml/wps588s7T.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片191.png)
 
 图4.4.3-27	UDP通信时客户端主链路捕包情况
 
 客户端系统PRIP状态显示如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpslZYQ5u.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片192.png)
 
 图4.4.3-28 客户端系统PRIP状态显示
 
 服务器端主从链路网卡的捕包情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpslPkg45.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片193.png)
 
 图4.4.3-29 UDP通信时服务端从链路捕包情况
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsc8KH2G.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片194.png)
 
 图4.4.3-30 UDP通信时服务端主链路的捕包情况
 
 服务端系统PRIP状态显示如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsuYFb1h.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片195.png)
 
 图4.4.3-31 服务器端PRIP状态显示
 
@@ -1737,13 +1737,13 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 首先使用ifconfig命令查看客户端和服务器端主从链路网卡的状态，如以下两图所示。
 
-![img](file:////tmp/wps-rocky/ksohtml/wps2XmHZS.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片196.png)
 
 图4.4.3-32 客户端主从链路网卡状态
 
 由上图可知，客户端主从链路网卡都处于up状态。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpspV9eYt.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片197.png)
 
 图4.4.3-33 服务端主从链路网卡状态
 
@@ -1753,25 +1753,25 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端的主从链路的捕包情况，如下图所示：
 
-s![img](file:////tmp/wps-rocky/ksohtml/wpsAQMOW4.jpg)
+![](../image/PRIP并行冗余通信协议自测报告/图片198.png)
 
 图4.4.3-34 客户端主链路网卡捕包情况
 
 由于服务端主链路处于down状态，所以客户端发送出去的主包由于查找不到下一跳的mac地址，所以客户端发送给服务端的主包也发送不出去，也就捕获不到。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsNgsqVF.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片199.png)
 
 图4.4.3-35 客户端从链路网卡捕包情况
 
 由上图可知，客户端从链路能够正常收发双方通信的从包，从而保证了双方应用程序的正常通信。双方建立连接的情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsPUd5Tg.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片200.png)
 
 图4.4.3-36 客户端显示双方连接建立情况
 
 客户端系统PRIP状态显示，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsBwvMSR.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片201.png)
 
 图4.4.3-37 客户端系统PRIP状态显示
 
@@ -1779,13 +1779,13 @@ s![img](file:////tmp/wps-rocky/ksohtml/wpsAQMOW4.jpg)
 
 服务端主从链路网卡的捕包情况，如下两图所示：
 
- ![img](file:////tmp/wps-rocky/ksohtml/wps2pPvRs.jpg)
+![](../image/PRIP并行冗余通信协议自测报告/图片202.png)
 
 图4.4.3-38服务端主链路网卡捕包情况
 
 由于服务端主链路网卡处于 down状态，所以主链路网卡不能进行数据包收发。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsRz0gQ3.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片203.png)
 
 图4.4.3-39 服务端从链路网卡的捕包情况
 
@@ -1793,13 +1793,13 @@ s![img](file:////tmp/wps-rocky/ksohtml/wpsAQMOW4.jpg)
 
 服务端显示双方连接建立情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsUtj5OE.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片204.png)
 
 图4.4.3-40 服务端显示双方连接建立的情况
 
 服务端系统的PRIP状态显示，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsHkRVNf.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片205.png)
 
 图4.4.3-41 服务端PRIP状态显示
 
@@ -1809,33 +1809,33 @@ s![img](file:////tmp/wps-rocky/ksohtml/wpsAQMOW4.jpg)
 
 客户端主从链路的捕包情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsd08NMQ.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片206.png)
 
 图4.4.3-42 UDP通信时客户端主链路捕包情况
 
-![img](file:////tmp/wps-rocky/ksohtml/wpstXOILr.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片207.png)
 
 图4.4.3-43 	UDP通信时客户端从链路捕包情况
 
 客户端系统PRIP状态显示如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpshoGGK2.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片208.png)
 
 图4.4.3-44 客户端系统PRIP状态显示
 
 服务器端主从链路网卡的捕包情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsNl5FJD.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片209.png)
 
 图4.4.3-45 UDP通信时服务端主链路捕包情况
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsQyqHIe.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片210.png)
 
 图4.4.3-46 UDP通信时服务端从链路的捕包情况
 
 服务端系统PRIP状态显示如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsiHGLHP.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片211.png)
 
 图4.4.3-47 服务器端PRIP状态显示
 
@@ -1847,13 +1847,13 @@ s![img](file:////tmp/wps-rocky/ksohtml/wpsAQMOW4.jpg)
 
 首先使用ifconfig命令查看客户端和服务器端主从链路网卡的状态，如以下两图所示。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsp2GRGq.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片212.png)
 
 图4.4.3-48 客户端主从链路网卡网线连接
 
 由上图可知，客户端的主从链路都处于up状态。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsKXa0F1.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片213.png)
 
 图4.4.3-49 服务端主从链路网线连接
 
@@ -1863,25 +1863,25 @@ s![img](file:////tmp/wps-rocky/ksohtml/wpsAQMOW4.jpg)
 
 客户端的主从链路的捕包情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsTk5aFC.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片214.png)
 
 图4.4.3-50 客户端从链路网卡捕包情况
 
 由于服务端从链路处于down状态，所以客户端发送出去的从包由于查找不到下一跳的mac地址，所以客户端发送给服务端的从包也发送不出去，也就捕获不到。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpssrhoEd.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片215.png)
 
 图4.4.3-51 客户端主链路网卡捕包情况
 
 由上图可知，客户端主链路能够正常收发双方通信的从包，从而保证了双方应用程序的正常通信。双方建立连接的情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsppcEDO.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片216.png)
 
 图4.4.3-52 客户端显示双方连接建立情况
 
 客户端系统PRIP状态显示，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wps70jWCp.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片217.png)
 
 图4.4.3-53 客户端系统PRIP状态显示
 
@@ -1891,7 +1891,7 @@ s![img](file:////tmp/wps-rocky/ksohtml/wpsAQMOW4.jpg)
 
  
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsRmsgC0.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片218.png)
 
 图4.4.3-54 服务端从链路网卡捕包情况
 
@@ -1899,7 +1899,7 @@ s![img](file:////tmp/wps-rocky/ksohtml/wpsAQMOW4.jpg)
 
  
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsGCFCBB.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片219.png)
 
 图4.4.3-55 服务端主链路网卡的捕包情况
 
@@ -1907,13 +1907,13 @@ s![img](file:////tmp/wps-rocky/ksohtml/wpsAQMOW4.jpg)
 
 服务端显示双方连接建立情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsJEZ1Ac.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片220.png)
 
 图4.4.3-56 服务端显示双方连接建立的情况
 
 服务端系统的PRIP状态显示，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsqKFtAN.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片221.png)
 
 图4.4.3-57 服务端PRIP状态显示
 
@@ -1923,33 +1923,33 @@ s![img](file:////tmp/wps-rocky/ksohtml/wpsAQMOW4.jpg)
 
 客户端主从链路的捕包情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wps088Wzo.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片222.png)
 
 图4.4.3-58 UDP通信时客户端从链路捕包情况
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsiVHszZ.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片223.png)
 
 图4.4.3-59	UDP通信时客户端主链路捕包情况
 
 客户端系统PRIP状态显示如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsj970yA.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片224.png)
 
 图4.4.3-60 客户端系统PRIP状态显示
 
 服务器端主从链路网卡的捕包情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpscagByb.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片225.png)
 
 图4.4.3-61 UDP通信时服务端从链路捕包情况
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsoNodyM.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片226.png)
 
 图4.4.3-62 UDP通信时服务端主链路的捕包情况
 
 服务端系统PRIP状态显示如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpscOtSxn.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片227.png)
 
 图4.4.3-63 服务器端PRIP状态显示
 
