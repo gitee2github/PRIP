@@ -474,17 +474,17 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端运行应用程序后会通过主从链路与服务端进行三次握手建立连接，在客户端通过tcpdump工具查看其通信过程，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsfLzGgB.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片30.png)
 
 图4.30 客户端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wps3gFt9b.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片31.png)
 
 图4.31 客户端从链路捕包截图
 
 此时连接已建立，然后通过netstat命令将连接建立前和连接建立后的系统网路连接的进行对比，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wps6KCi2M.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片32.png)
 
 图4.32 客户端网络连接截图
 
@@ -492,7 +492,7 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 然后再通过查看客户端系统PRIP的状态，来得到主从链路的状态以及主从链路收发包的个数，便于与服务器端的PRIP状态显示的主从链路收发包的个数做对比，看双方是否一致。客户端PRIP状态如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpswgu9Un.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片33.png)
 
 图4.33 客户端PRIP状态显示
 
@@ -500,7 +500,7 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 首先将服务器端的监听应用程序启用，此时在客户端启用应用程序连接服务器前，查看服务器的PRIP的状态，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsCOZ1NY.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片34.png)
 
  图4.34 服务端未接受连接前PRIP状态
 
@@ -508,11 +508,11 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端启用应用程序连接服务端，然后在服务器端进行捕包，如下两图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsulnWGz.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片35.png)
 
 图4.35 服务端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsv7TSza.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片36.png)
 
 图4.36 服务端从链路捕包截图
 
@@ -520,7 +520,7 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 在服务端使用netstat命令来查看连接建立前和连接建立后的系统网络连接，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsLbKRsL.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片37.png)
 
 图4.37 服务端接受连接前后网络连接
 
@@ -528,7 +528,7 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 服务端与客户端建立连接后，查看服务端PRIP的状态，因为与客户端有数据包通信，所以服务端PRIP状态能够看到PRIP缓存项，并能显示与该路IP地址的主从链路的状态以及主从链路的收发包个数。服务端PRIP状态显示如下所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsQZFSlm.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片38.png)
 
 图4.38 服务端建立连接后PRIP状态显示
 
