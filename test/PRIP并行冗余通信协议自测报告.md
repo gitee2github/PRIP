@@ -683,37 +683,37 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端主从链路通信过程，如下两图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsQPAMKh.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片53.png)
 
 图4.53 客户端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsmXHzES.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片54.png)
 
 图4.54 客户端从链路捕包截图
 
 客户端系统PRIP状态显示，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpspdEpyt.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片55.png)
 
 图4.55 客户端PRIP状态显示
 
-4.3.5.1 服务端捕包与PRIP状态显示
+4.3.5.2 服务端捕包与PRIP状态显示
 
 服务端修改应用程序添加keepalive保活机制，然后对主从链路的网卡进行捕包，查看其网络通信过程。
 
 服务器端主从网卡的通信过程如下两图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsPvIhs4.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片56.png)
 
 图4.56 服务端主链路网卡的捕包截图 
 
-![img](file:////tmp/wps-rocky/ksohtml/wps1CsdmF.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片57.png)
 
 图4.57 服务器端从链路网卡捕包的截图
 
 服务器端系统PRIP状态显示，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsgJncgg.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片58.png)
 
 图4.58 服务端PRIP状态显示
 
