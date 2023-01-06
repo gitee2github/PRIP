@@ -76,3 +76,6 @@ static int do_ip_setsockopt(struct sock *sk, int level,
 
 败,则将 opt 的 prip 偏移值置为 1,并将返回值置为错误。
 
+如果原 socket 已添加 PRIP 选项,且 opt 中不包含 PRIP 选项(去除 PRIP 选项),则将
+
+PRIP 计数减一。
