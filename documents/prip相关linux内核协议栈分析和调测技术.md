@@ -187,13 +187,28 @@ TCP 协议 RST 数据包 PRIP 协议冗余发送处理是在 IP 网络层实现�
 
 ip_send_unicast_reply()函数位于内核源码 Linux4.9.130/net/ipv4/ip_output.c 文件里。修改后函数代码如下:
 
+```
+void ip_send_unicast_reply(struct sock *sk, struct sk_buff *skb,
+const struct ip_options *sopt,
+__be32 daddr, __be32 saddr,
+const struct ip_reply_arg *arg,
+unsigned int len)
+{
+................
 
+}
+```
 
 本函数会在主包路由失败的情况下,继续对从包进行路由。如果主包路由成功,则不进行从包路由,而后发送数据包。
 需要说明的时,此时从包尚未产生。对从包路由指的是,是以从包目的 IP 进行路由。
 ip_push_pending_frames()函数位于内核源码 Linux4.9.130/net/ipv4/ip_output.c 文件里。修改后函数代码如下:
 
+```
+int ip_push_pending_frames_prip(struct sock *sk, struct flowi4 *fl4)
+{
 
+}
+```
 
 
 
@@ -229,7 +244,12 @@ udp_sendmsg()函数位于传输层,ip_push_pending_frames()函数位于 IP 网�
 UDP 协议 PRIP 协议冗余发送处理在传输层和 IP 网络层里共同实现。
 udp_sendmsg()函数位于 Linux4.9.130/net/ipv4/udp.c 文件里。修改后的函数源码如下:
 
-
+```
+int udp_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
+{
+................
+}
+```
 
 
 
@@ -300,7 +320,15 @@ ip_local_deliver()函数位于内核路径 Linux4.9.130/include/net/ip_input.c �
 函似内部直接嵌入冗余接收代码以实现 PRIP 协议冗余接收功能。 修改后的 ip_local_deliver()函数
 代码如下所示,其中黑体部分为增加的 PRIP 冗余接收功能实现代码:
 
+```
+int ip_local_deliver(struct sk_buff *skb)
+{
+/*
+* Reassemble IP fragments.
+*/#ifdef CONFIG_PRIP
 
+}
+```
 
 
 
@@ -319,7 +347,33 @@ ip_local_deliver()函数位于内核路径 Linux4.9.130/include/net/ip_input.c �
 其里面添加 PRIP 选项的相关的成员域,其定义位于 Linux4.9.130/include/net/inet_sock.h 文件中,
 下面黑体部分为添加的 PRIP 协议 IP 选项相关的成员,具体定义如下:
 
-
+```
+struct ip_options {
+__be32
+faddr;
+__be32
+nexthop;
+unsigned char optlen;
+unsigned char srr;
+unsigned char rr;
+unsigned char ts;
+unsigned char is_strictroute:1,
+srr_is_hit:1,
+is_changed:1,
+rr_needaddr:1,
+ts_needtime:1,
+ts_needaddr:1;
+unsigned char router_alert;
+unsigned char cipso;
+#ifdef CONFIG_PRIP
+unsigned char prip;
+#endif
+unsigned char
+unsigned char
+__pad2;
+__data[0];
+};
+```
 
 ip_options 结构体中存放了需要发送、前送或者接收后解析出来的 IP 选项,它描述的不是某一个
 类型的 IP 选项,而是一个数据包携带的所有 IP 选项的集合,下面介绍个数据域的基本含义:
@@ -352,7 +406,13 @@ __data[0]:该数据域指向存放要加入数据包协议头的 IP 选项的地
 Linux4.9.130/net/ipv4/ip_options.c 路径下。 我们需要在该函数内部嵌入构建 PRIP 协议 IP 选项
 的代码,修改后的 ip_options_build()函数如下
 
+```:
+void ip_options_build(struct sk_buff *skb, struct ip_options *opt,
+__be32 daddr, struct rtable *rt, int is_frag)
+{
 
+}
+```
 
 如果是属于 PRIP 数据包的话 , 那么构建 PRIP 协议 IP 选项。调用 prip_priv_find() 函数获取该
 IP 对儿的私有结构体 struct prip_priv, 该结构体包了本 IP 对儿 PRIP 通信所需的全部信息。
@@ -377,7 +437,11 @@ PRIP 序列号 pripid 和发送时间戳 snd_start 更新和维护。
 每两台进行 PRIP 通信的主机被成为一个 PRIP 协议 IP 对。本解决方案为每一个 IP 对维护了一
 个 PRIP 通信私有数据结构体 struct prip_priv 。
 
+```
+struct prip_priv{
 
+};
+```
 
 
 
@@ -399,7 +463,13 @@ PRIP 序列号 pripid 和发送时间戳 snd_start 更新和维护。
 struct prip_priv 结构体的查找实现函数为 prip_find() 。 位于 Linux4.9.130/net/prip
 /prip.c 文件里 , 该文件是 PRIP 项目添加到内核的新文件。 prip_find() 函数代码实现如下 :
 
+```
+struct prip_priv * prip_priv_find(__u32 localip, __u32 peerip){
+int hash;
+struct prip_priv * q;
 
+}
+```
 
 注释 1:根据目的 IP 和源 IP 生成哈希值。
 注释 2:每次访问 struct prip_priv 结构体都会将其老化到期时间顺延至本时刻将来 60 秒那刻。
@@ -443,7 +513,12 @@ JIFFIES_H,值等于发送本轮序列号为 32769 的主包时的本地系统 ji
 ip_local_deliver()调用。prip_check()位于 Linux4.9.130/net/prip/prip.c 文件里面。函数代码如
 下:
 
+```
+int prip_check(u16 seq, int isdup, struct prip_priv *priv, unsigned long start)
+{
 
+}
+```
 
 
 
