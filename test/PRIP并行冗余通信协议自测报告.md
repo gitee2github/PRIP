@@ -3065,7 +3065,7 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 在将客户端从链路网卡eth1网线拔掉前后，客户端系统PRIP状态显示内容的变化，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsKVeXTC.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片362.png)
 
 图4.5.1-1 客户端PRIP状态显示内容的变化
 
@@ -3073,13 +3073,13 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端日志/var/log/messages中打印的告警信息如下所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsLMakZd.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片363.png)
 
 图4.5.1-2 客户端日志打印的告警信息
 
 服务端PRIP状态显示内容的变化，如下图所示：
 
-s![img](file:////tmp/wps-rocky/ksohtml/wpsvI2I4O.jpg)
+![](../image/PRIP并行冗余通信协议自测报告/图片364.png)
 
 图4.5.1-3 服务端PRIP状态显示内容的变化
 
@@ -3087,7 +3087,7 @@ s![img](file:////tmp/wps-rocky/ksohtml/wpsvI2I4O.jpg)
 
 服务端日志/vat/log/messages中打印的告警信息，如下所示：
 
-ss![img](file:////tmp/wps-rocky/ksohtml/wpsxGbaaq.jpg)
+![](../image/PRIP并行冗余通信协议自测报告/图片365.png)
 
 图4.5.1-4 服务端日志打印的告警信息
 
