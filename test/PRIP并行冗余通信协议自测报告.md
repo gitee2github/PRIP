@@ -3141,7 +3141,7 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpsxGbaaq.jpg)
 
 启动服务端PRIP监听应用程序，然后启用客户端非PRIP应用程序去连接服务端，首先查看服务端PRIP状态和与客户端连接情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsQAhXqd.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片368.png)
 
 图4.7.1-1 服务端PRIP状态显示和连接情况
 
@@ -3149,7 +3149,7 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpsxGbaaq.jpg)
 
 客户端PRIP状态和与服务器连接情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpshEhGwO.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片369.png)
 
 图4.7.1-2 客户端PRIP状态显示和连接情况
 
@@ -3157,11 +3157,11 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpsxGbaaq.jpg)
 
 客户端的主从链路的捕包情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsnztsCp.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片370.png)
 
 图4.7.1-3 客户端主链路网卡捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsS2aiI0.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片371.png)
 
 图4.7.1-4 客户端从链路网卡捕包截图
 
@@ -3169,11 +3169,11 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpsxGbaaq.jpg)
 
 服务端主从链路的捕包情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsTvL9NB.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片372.png)
 
 图4.7.1-5 服务端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsy1R4Tc.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片373.png)
 
 ​        图4.7.1-6 服务端从链路捕包截图
 
