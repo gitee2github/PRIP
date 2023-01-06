@@ -2768,17 +2768,17 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端PRIP状态显示，如下图所示：
 
-![](../image/PRIP并行冗余通信协议自测报告/图片313.png)
+![](../image/PRIP并行冗余通信协议自测报告/图片314.png)
 
 图4.4.10-22 客户端PRIP状态显示
 
 服务端主从链路捕包情况，如下图所示：
 
-![](../image/PRIP并行冗余通信协议自测报告/图片314.png)
+![](../image/PRIP并行冗余通信协议自测报告/图片315.png)
 
 图4.4.10-23 服务端主链路捕包截图
 
-![](../image/PRIP并行冗余通信协议自测报告/图片315.png)
+![](../image/PRIP并行冗余通信协议自测报告/图片316.png)
 
 图4.4.10-24 服务端从链路捕包截图
 
@@ -2796,25 +2796,19 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 通信双方配置网段存在子集的测试如下：
 
-将客户端的PRIP配置网段设置为服务端PRIP配置网段的子集，如下图所示：
+将客户端的PRIP配置网段设置为服务端PRIP配置网段的子集
 
-s![img](file:////tmp/wps-rocky/ksohtml/wpsXplEz5.jpg)
 
-图4.4.10-25 客户端网卡和PRIP配置
-
-![img](file:////tmp/wps-rocky/ksohtml/wpsUgPDDG.jpg) 
-
-图4.4.10-26 服务端网卡和PRIP配置
 
 启用客户端应用程序去连接服务器，通过捕包查看双方的通信过程，并查看双方系统的PRIP的状态。
 
 客户端主从链路捕包如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsKuOFHh.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片319.png)
 
 图4.4.10-27 客户端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsNLEKLS.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片320.png)
 
 图4.4.10-28 客户端从链路捕包截图
 
@@ -2822,13 +2816,13 @@ s![img](file:////tmp/wps-rocky/ksohtml/wpsXplEz5.jpg)
 
  
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsHvmSPt.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片317.png)
 
 图4.4.10-29 客户端显示双方连接情况
 
 客户端PRIP状态显示如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsxud2T4.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片318.png)
 
 图4.4.10-30 客户端PRIP状态显示
 
@@ -2836,23 +2830,23 @@ s![img](file:////tmp/wps-rocky/ksohtml/wpsXplEz5.jpg)
 
 服务端主从链路捕包情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsUxXdYF.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片323.png)
 
 图4.4.10-31 服务端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsZO6s2g.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片322.png)
 
 图4.4.10-32 服务端从链路捕包截图
 
 服务端显示双方连接建立的情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsqQnL6R.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片317.png)
 
 图4.4.10-33 服务端显示双方连接建立情况
 
 服务端系统PRIP状态显示如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wps2BT5at.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片318.png)
 
 图4.4.10-34 服务端系统PRIP状态显示
 
