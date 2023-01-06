@@ -3110,11 +3110,11 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpsxGbaaq.jpg)
 
 客户端主链路网卡捕包情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpszPJGf1.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片366.png)
 
 图4.6-1 客户端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wps7bBglC.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片367.png)
 
 图4.6-2 客户端从链路捕包截图
 
