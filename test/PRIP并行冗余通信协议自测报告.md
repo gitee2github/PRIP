@@ -2744,7 +2744,7 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端PRIP配置文件保持不变，如图4.4.10-1所示，将服务端启用两个新的网卡，将其ip地址设置为10.0.0.0/24和10.1.0.0/24网段的地址，并将这两个网段设置为服务器端PRIP的配置，如图4.4.10-18所示。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsEYKJ8T.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片309.png)
 
 图4.4.10-18 服务端网卡和PRIP配置
 
@@ -2752,33 +2752,33 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端主从链路捕包如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsFTTtcv.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片310.png)
 
 图4.4.10-19 客户端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsvEdgg6.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片311.png)
 
 图4.4.10-20 客户端从链路捕包截图
 
 如上两图，客户端主从链路发送出去的数据包都没有收到服务器端的回应包，而客户端应用程序的运行状态如下图所示：
 
-s![img](file:////tmp/wps-rocky/ksohtml/wps9oY4jH.jpg)
+![](../image/PRIP并行冗余通信协议自测报告/图片312.png)
 
 图4.4.10-21 客户端应用程序运行状态
 
 客户端PRIP状态显示，如下图所示：
 
-s![img](file:////tmp/wps-rocky/ksohtml/wpsvfaVni.jpg)
+![](../image/PRIP并行冗余通信协议自测报告/图片313.png)
 
 图4.4.10-22 客户端PRIP状态显示
 
 服务端主从链路捕包情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsou3MrT.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片314.png)
 
 图4.4.10-23 服务端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wps4kkHvu.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片315.png)
 
 图4.4.10-24 服务端从链路捕包截图
 
