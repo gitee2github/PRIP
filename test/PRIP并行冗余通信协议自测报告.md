@@ -2873,13 +2873,13 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 将客户端的PRIP配置文件清空，如图4.4.11.1所示，然后启用客户端应用程序，查看应用程序的运行状态，如图4.4.11.2所示。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsnd5vf4.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片324.png)
 
 图4.4.11.1 客户端网卡和PRIP配置
 
 由上图可知，客户端系统的PRIP配置已被清空。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsQLRYjF.jpg) 
+
 
 图4.4.11.2 客户端应用程序运行状态
 
@@ -2889,11 +2889,9 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 将客户端的PRIP配置文件设置正常，如图4.4.11.3所示，然后将服务端的PRIP配置文件清空，如图4.4.11.4所示。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsxNGtog.jpg) 
 
-图4.4.11.3 客户端网卡和PRIP配置
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsjgX0sR.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片324.png)
 
 图4.4.11.4 服务端网卡和PRIP配置
 
@@ -2903,33 +2901,33 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端主从链路捕包如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsMIKAxs.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片325.png)
 
 图4.4.11-5 客户端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsCAEcC3.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片326.png)
 
 图4.4.11-6 客户端从链路捕包截图
 
 如上两图，客户端主从链路发送出去的数据包都没有收到服务器端的回应包，而客户端应用程序的运行状态如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsh7KQGE.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片327.png)
 
 图4.4.11-7 客户端应用程序运行状态
 
 客户端PRIP状态显示，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsNMfwLf.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片328.png)
 
 图4.4.11-8 客户端PRIP状态显示
 
 服务端主从链路捕包情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsnendQQ.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片329.png)
 
 图4.4.11-9 服务端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsp2KWUr.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片330.png)
 
 图4.4.11-10 服务端从链路捕包截图
 
