@@ -3004,17 +3004,17 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 当客户端内存不足时，客户端内核中会将该包丢弃，不会将该数据包发送出去，如下图所示：
 
-![](../image/PRIP并行冗余通信协议自测报告/图片333.png)
+![](../image/PRIP并行冗余通信协议自测报告/图片363.png)
 
 图4.4.14.1-1 客户端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsNZ7Djr.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片363.png)
 
 图4.4.14-2 客户端从链路捕包截图
 
 客户端应用程序的运行状态会显示连接超时，如下图所示：
 
-![](../image/PRIP并行冗余通信协议自测报告/图片344.png)
+![](../image/PRIP并行冗余通信协议自测报告/图片363.png)
 
 图4.4.14-3客户端应用程序运行状态
 
@@ -3024,23 +3024,23 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端主从链路捕包情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpskauQtD.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片357.png)
 
 图4.4.14-4 客户端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpssNtZye.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片358.png)
 
 图4.4.14-5 客户端从链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsZRqaEP.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片359.png)
 
 图4.4.14-6 服务端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsMLxnJq.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片360.png)
 
 图4.4.14-7 服务端从链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsliDCO1.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片361.png)
 
 图4.4.14-8 客户端应用程序运行状态
 
