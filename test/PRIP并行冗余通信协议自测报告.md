@@ -2520,7 +2520,7 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 首先服务端启用监听应用程序，然后查看端口监听情况与PRIP状态显示，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsUhY2Nm.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片299.png)
 
 图4.4.8-1 服务端端口监听与prip启用情况
 
@@ -2528,31 +2528,31 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端启用应用程序去连接服务器，通过捕包工具查看其通信过程。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsf4gDQX.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片300.png)
 
 图4.4.8-2 客户端主链路网卡捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsNVjgTy.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片301.png)
 
 图4.4.8-3 客户端从链路捕包截图
 
 客户端显示双方连接情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsfXgWV9.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片302.png)
 
 图4.4.8-4 客户端显示双方连接情况
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsynEEYK.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片303.png)
 
 图 4.4.8-5 服务端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsqW5p1l.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片304.png)
 
 图4.4.8-6 服务端从链路捕包截图
 
 服务端显示双方连接情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wps9Kze4W.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片305.png)
 
 图4.4.8-7 服务端显示双方连接截图
 
