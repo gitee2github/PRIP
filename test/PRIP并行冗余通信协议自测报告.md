@@ -2620,13 +2620,15 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端网卡和PRIP配置如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpseE47cK.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片308.png)
 
 图4.4.10-1 客户端网卡和PRIP配置
 
-服务端网卡和PRIP配置如下图所示：
+服务端网卡和PRIP配置如下图所示： 
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsKYGcgl.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片309.png)
+
+ 
 
 图4.4.10-2 服务端网卡和PRIP配置
 
@@ -2636,13 +2638,13 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端主从链路捕包如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsHCzkjW.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片310.png)
 
 图4.4.10-3 客户端主链路捕包截图
 
 由于此次测试中192.168.0.0网段作为主链路网段，并且双方主链路网段又是相同的，所以主链路网段能够正常通信。
 
-ss![img](file:////tmp/wps-rocky/ksohtml/wpshAtvmx.jpg)
+![](../image/PRIP并行冗余通信协议自测报告/图片311.png)
 
 图4.4.10-4 客户端从链路捕包截图
 
@@ -2650,7 +2652,7 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpshAtvmx.jpg)
 
 由于双方主链路能够正常通信，所以双方能够建立连接，客户端应用程序状态及客户端显示双方连接情况，如下图所示。
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsaXFIp8.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片312.png)
 
  
 
@@ -2658,13 +2660,13 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpshAtvmx.jpg)
 
  
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsquDXsJ.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片313.png)
 
 图4.4.10-6 客户端显示双方连接情况
 
 客户端PRIP状态显示如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsw4Mewk.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片314.png)
 
 图4.4.10-7 客户端PRIP状态显示
 
@@ -2672,13 +2674,13 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpshAtvmx.jpg)
 
 服务端主从链路捕包情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsrGOxzV.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片315.png)
 
 图4.4.10-8 服务端主链路捕包截图
 
 由于此次测试中192.168.0.0网段作为主链路网段，并且双方主链路网段又是相同的，所以主链路网段能够正常通信。
 
-![img](file:////tmp/wps-rocky/ksohtml/wps9E3TCw.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片316.png)
 
 图4.4.10-9 服务端从链路捕包截图
 
@@ -2686,13 +2688,13 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpshAtvmx.jpg)
 
 服务端显示双方连接建立的情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsu9TiG7.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片317.png)
 
 图4.4.10-10 服务端显示双方连接建立情况
 
 服务端系统PRIP状态显示如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsc7VJJI.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片318.png)
 
 图4.4.10-11 服务端系统PRIP状态显示
 
@@ -2706,33 +2708,29 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpshAtvmx.jpg)
 
 客户端主从链路捕包如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsMzScNj.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片319.png)
 
 图4.4.10-12 客户端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsvw2HQU.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片320.png)
 
 图4.4.10-13 客户端从链路捕包截图
 
 如上两图，客户端主从链路发送出去的数据包都没有收到服务器端的回应包，而客户端应用程序的运行状态如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpssTjfUv.jpg) 
-
-图4.4.10-14 客户端应用程序运行状态
-
 客户端PRIP状态显示，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsRP4NX6.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片321.png)
 
 图4.4.10-15 客户端PRIP状态显示
 
 服务端主从链路捕包情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpssJxo1H.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片322.png)
 
 图4.4.10-16 服务端主链路捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wps1KJ24i.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片323.png)
 
 图4.4.10-17 服务端从链路捕包截图
 
