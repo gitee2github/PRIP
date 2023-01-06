@@ -2577,13 +2577,13 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端网卡设置和PRIP配置如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wps8B286x.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片306.png)
 
 图4.4.9-1 客户端网卡和PRIP配置
 
 启用客户端应用程序，查看应用程序运行状态，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsSwU598.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片307.png)
 
 图4.4.9-2 应用程序运行状态
 
