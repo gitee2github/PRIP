@@ -3004,7 +3004,7 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 当客户端内存不足时，客户端内核中会将该包丢弃，不会将该数据包发送出去，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsdQdAeQ.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片333.png)
 
 图4.4.14.1-1 客户端主链路捕包截图
 
@@ -3014,7 +3014,7 @@ PRIP功能支持设置连续丢包报警阈值的功能，其值默认是500，�
 
 客户端应用程序的运行状态会显示连接超时，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsetrJo2.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片344.png)
 
 图4.4.14-3客户端应用程序运行状态
 
@@ -3202,7 +3202,7 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpsxGbaaq.jpg)
 
 客户端PRIP状态显示和连接情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsePq5ZN.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片374.png)
 
 图4.7.2-1 客户端PRIP状态显示和连接情况
 
@@ -3210,7 +3210,7 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpsxGbaaq.jpg)
 
 服务端PRIP状态显示和连接情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsMz975o.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片375.png)
 
 图4.7.2-2 服务端PRIP状态显示和连接情况
 
@@ -3218,21 +3218,21 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpsxGbaaq.jpg)
 
 首先是客户端与服务端8080端口PRIP连接的捕包情况，客户端主从链路的捕包情况如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsg5jdc0.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片376.png)
 
 图4.7.2-3 客户端主链路PRIP连接捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpscSNliB.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片377.png)
 
 图4.7.2-4 客户端从链路PRIP连接捕包截图
 
 服务端主从链路PRIP的连接捕包情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsgoyyoc.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片378.png)
 
 图4.7.2-5 服务端主链路PRIP连接捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsxl3OuN.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片379.png)
 
 图4.7.2-6 服务端从链路PRIP连接捕包截图
 
@@ -3240,19 +3240,19 @@ ss![img](file:////tmp/wps-rocky/ksohtml/wpsxGbaaq.jpg)
 
 客户端正常网络连接的数据包在主从链路网卡上的收发情况，如下图所示：
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsubs9Ao.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片380.png)
 
 图4.7.2-7 客户端正常网络连接主链路网卡捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsZrdxHZ.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片381.png)
 
 图4.7.2-8 客户端正常网络从链路网卡捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpsmGQWNA.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片382.png)
 
 图4.7.2-9 服务端正常网络主链路网卡捕包截图
 
-![img](file:////tmp/wps-rocky/ksohtml/wpste0pUb.jpg) 
+![](../image/PRIP并行冗余通信协议自测报告/图片383.png)
 
 图4.7.2-10 服务端正常网络从链路捕包截图
 
