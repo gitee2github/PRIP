@@ -135,3 +135,28 @@ int do_unset(int argc, char **argv)
 static int unset_prip(void)
 ```
 
+
+
+## 5 prip的显示功能
+
+主函数
+
+```
+int do_show(int argc, char **argv)
+```
+
+根据第一个参数，确认出需要显示输出的配置项，包括：alarm timeout config state，并调用相应的函数实现
+
+```
+//输出告警阈值信息
+static void show_alarm(void)
+{
+    char cmd[1024];
+    char str[16];
+    strcpy(str, "PRIP_ALARM"); 
+    snprintf(cmd, sizeof(cmd), "cat %s", PATH_PRIP_ALARM);
+    exec_config_cmd(cmd, str, 1);
+    return;
+}
+```
+
