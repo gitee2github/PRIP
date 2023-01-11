@@ -77,3 +77,45 @@ int check_ip(char *str)
 
 ​	检查ip地址的合法性
 
+
+
+## 3 开启prip，设置prip参数 set.c set.h
+
+主函数
+
+```
+int do_set(int argc, char **argv)
+```
+
+​	根据地一个参数，判断是设置ip地址还是设置prip
+
+​	如果是设置prip，再根据第二个参数判断是设置prip的配置信息，或者告警阈值，或者超时时间
+
+
+
+```
+//设置网口ip地址和掩码
+static int set_dev(char *devname, char *value, int mask)
+```
+
+
+
+```
+//开启prip功能，并设置主从链路的ip地址对
+static int set_config(char *ip1, char *ip2, int mask)
+```
+
+
+
+```
+//	设置告警阈值的大小，默认为500，如果主链路或者从链路连续500次没有收到包，则进行报警
+static int set_alarm(int value)
+```
+
+
+
+```
+//设置超时时间，默认是3秒
+static int set_timeout(int value)
+```
+
