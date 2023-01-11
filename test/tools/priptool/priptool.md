@@ -40,3 +40,40 @@ static const struct cmd cmds[] =
 
 
 
+## 2 通用函数 utils.c utils.h
+
+2.1 utils.h中定义各个prip相关文件的路径，声明通用函数，如下：
+
+```
+#define PATH_PRIP_CONFIG "/proc/prip/prip_config"
+#define PATH_PRIP_ALARM "/proc/prip/prip_alarm"
+#define PATH_PRIP_TIMEOUT "/proc/prip/prip_cache_timeout"
+#define PATH_PRIP_STATE "/proc/prip/prip_state"
+#define PATH_PRIP_SET "/proc/sys/net/ipv4/prip_set"
+
+```
+
+2.2 utils.c 中对通用函数进行实现，主要有如下函数：
+
+```
+void exec_config_cmd(char *cmd, char *str, int flag)
+```
+
+​	在程序中执行cmd指令对文件进行查看，并将查看结果打印输出，关键函数popen
+
+
+
+```
+void exec_cmd(char *cmd)
+```
+
+​	在程序中执行cmd指令，对文件进行修改或者设置网口ip地址
+
+
+
+```
+int check_ip(char *str)
+```
+
+​	检查ip地址的合法性
+
