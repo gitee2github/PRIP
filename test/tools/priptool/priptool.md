@@ -175,3 +175,20 @@ static void show_timeout(void)
 }
 ```
 
+
+
+
+
+```
+//输出配置信息
+static void show_config(void)
+{
+    char cmd[1024];
+    char str[16];
+    strcpy(str, "PRIP_CONFIG");
+    snprintf(cmd, sizeof(cmd), "cat %s", PATH_PRIP_CONFIG);
+    exec_config_cmd(cmd, str, 1);
+    return;
+}
+```
+
