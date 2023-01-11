@@ -192,3 +192,20 @@ static void show_config(void)
 }
 ```
 
+
+
+
+
+```
+//输出当前prip状态信息，包括PRIP_ON/OFF local_ip PRIP_MASTER_IP PRIP_SLAVE_IP PRIP_REFCNT refcnt peer_master_ip peer_slave_ip master_state slave_state master_send slave_send master_recv slave_recv
+static void show_state(void)
+{
+    char cmd[1024];
+    char str[16];
+    strcpy(str, "PRIP_STATE");
+    snprintf(cmd, sizeof(cmd), "cat %s", PATH_PRIP_STATE);
+    exec_config_cmd(cmd, str, 0);
+    return;
+}
+```
+
