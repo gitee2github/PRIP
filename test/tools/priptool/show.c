@@ -10,7 +10,15 @@ static void show_timeout(void);
 static void show_config(void);
 static void show_state(void);
 
-
+static void show_alarm(void)
+{
+	char cmd[1024];
+	char str[16];
+	strcpy(str, "PRIP_ALARM");
+	snprintf(cmd, sizeof(cmd), "cat %s", PATH_PRIP_ALARM);
+	exec_config_cmd(cmd, str, 1);
+	return;
+}
 
 int do_show(int argc, char **argv)
 {
