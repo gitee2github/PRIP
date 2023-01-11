@@ -119,3 +119,19 @@ static int set_alarm(int value)
 static int set_timeout(int value)
 ```
 
+
+
+## 4 关闭prip
+
+主函数
+
+```
+int do_unset(int argc, char **argv)
+```
+
+通过exec_cmd函数将/proc/sys/net/ipv4/prip_set置为0，将/proc/prip/prip_config 置为空
+
+```
+static int unset_prip(void)
+```
+
