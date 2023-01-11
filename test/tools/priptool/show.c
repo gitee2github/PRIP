@@ -40,6 +40,16 @@ static void show_config(void)
 	return;
 }
 
+static void show_state(void)
+{
+	char cmd[1024];
+	char str[16];
+	strcpy(str, "PRIP_STATE");
+	snprintf(cmd, sizeof(cmd), "cat %s", PATH_PRIP_STATE);
+	exec_config_cmd(cmd, str, 0);
+	return;
+}
+
 int do_show(int argc, char **argv)
 {
 	if(argc < 1)
