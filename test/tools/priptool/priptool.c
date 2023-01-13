@@ -29,6 +29,7 @@ static const struct cmd cmds[] =
 	{ "unset", 	do_unset},
 	{ "show",	do_show},
 	{ "help",	do_help},
+	{ "latency", do_latency },
 	{ "version",show_version},
 	{ 0 }
 };
@@ -87,11 +88,13 @@ static int usage(char *cmd)
 					"\tshow\t[timeout]\n"
 					"\tshow\t[config]\n"
 					"\tshow\t[state]\n"
+					"\tlatency\t[ip value1 value2] [dev value1 value2] [interval value] [rtt value] [rtt_diff value]\n"
 			"[Examples] :\n"
 					"\tset\t[dev]\t[eth1 192.168.122.80 24]\n"
 					"\tset\t[prip]\t[192.168.10.10 192.168.11.10 24]\n"
 					"\tset\t[alarm]\t[100]\n"
 					"\tshow\t[alarm]\n",
+					"\tlatency\t[ip 192.168.10.10 192.168.10.11] [dev eth1 eth2][interval 1] [rtt 1] [rtt_diff 1]\n"
 			cmd);
 
 	return 0;
