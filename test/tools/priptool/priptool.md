@@ -456,3 +456,34 @@ typedef struct tag_timer
 
 ```
 
+### 7.2 删除定时器
+
+```
+int del_timer(int id)
+```
+
+
+
+遍历定时器链表，找到指定time_id的定时器
+
+从链表中删除该定时器，更新“可用定时器”数组
+
+释放定时器结构
+
+```
+    list_for_each_safe(pstlist, pstNextlist, &g_timer_list)
+    {
+        pstTimer = list_entry(pstlist, TIMER, hook);
+        if (NULL != pstTimer)
+        {
+            if (pstTimer->timer_id == id)
+            {
+                list_del(&pstTimer->hook);
+                put_timer_fd(pstTimer->timer_id);
+                free(pstTimer);
+                goto unlock;
+            }
+        }
+    }
+```
+
