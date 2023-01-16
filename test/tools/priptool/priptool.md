@@ -401,3 +401,58 @@ if (rtt_diff > g_rtt_diff)
 }
 ```
 
+## 7 定时器的设计
+
+### 7.1 创建定时器
+
+```
+int create_timer(int id, int time_out, time_handler handler, void *data)
+```
+
+
+
+定时器结构体
+
+```
+typedef struct tag_timer
+{
+    struct list_head hook;
+    int timer_id;
+    int time_out;
+    int time;
+    time_handler handler;
+    void *data;
+
+}TIMER;
+```
+
+根据get_timer_fd获取一个空的定时器，设置该定时器的句柄handle，timer_id ，timer_out(定时器执行句柄的时间间隔)
+
+如果time_out 小于0 ，则置为1,否则按照指定时间间隔进行设定
+
+将组装好的定时器结构体加入定时器链表中
+
+```
+    pstTimer = malloc(sizeof(TIMER));
+    if (NULL == pstTimer)
+    {
+        return -1;
+    }
+
+    memset(pstTimer, 0, sizeof(TIMER));
+    pstTimer->timer_id = id;
+    pstTimer->time = 0;
+    pstTimer->handler = handler;
+
+    pstTimer->time_out = time_out < 0 ? 1: time_out;
+
+    pstTimer->data = data;
+
+    pthread_mutex_lock(&timer_mutex);
+
+    list_add(&pstTimer->hook, &g_timer_list);
+
+    pthread_mutex_unlock(&timer_mutex);
+
+```
+

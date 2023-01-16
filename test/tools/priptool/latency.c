@@ -145,7 +145,71 @@ static void red_printf(const char *__format, ...)
 	va_end(args);
 }
 
+static void create_pcap_handlers(void)
+{
+	int i, ret;
+	bpf_u_int32 mask = 0;
+	struct monitior mon;
+	struct bpf_program fp;
+	char filter_exp[] = "icmp [icmp-echoreply] = 0";
+	char errbuf[PCAP_ERRBUF_SIZE];
 
+	g_pcap_h.sendfd1 = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+	if (-1 == g_pcap_h.sendfd1)
+	{
+		fprintf(stderr, "Create Send Socket Failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	ret = setsockopt(g_pcap_h.sendfd1, SOL_SOCKET, SO_BINDTODEVICE, \
+				(const void*)master_dev, strlen(master_dev));
+	if (-1 == ret)
+	{
+		fprintf(stderr, "Bind socket to device %s failed.\n", master_dev);
+		exit(EXIT_FAILURE);
+	}
+
+	g_pcap_h.sendfd2 = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+	if (-1 == g_pcap_h.sendfd2)
+	{
+		fprintf(stderr, "Create Send Socket Failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	ret = setsockopt(g_pcap_h.sendfd2, SOL_SOCKET, SO_BINDTODEVICE, \
+				(const void*)slave_dev, strlen(slave_dev));
+	if (-1 == ret)
+	{
+		fprintf(stderr, "Bind socket to device %s failed.\n", slave_dev);
+		exit(EXIT_FAILURE);
+	}
+
+	for (i = 0; i < 2; i++)
+	{
+		g_pcap_h.recvers[i] = pcap_open_live(mon.recvinfo[i].name, 128, 0, 0, errbuf);
+		if (!g_pcap_h.recvers[i])
+		{
+			fprintf(stderr, "%s\n", errbuf);
+			exit(EXIT_FAILURE);
+		}
+
+		ret = pcap_compile(g_pcap_h.recvers[i], &fp, filter_exp, 0, mask);
+		if (-1 == ret)
+		{
+			pcap_perror(g_pcap_h.recvers[i], "");
+			exit(EXIT_FAILURE);
+		}
+
+		ret = pcap_setfilter(g_pcap_h.recvers[i], &fp);
+		if (-1 == ret)
+		{
+			pcap_perror(g_pcap_h.recvers[i], "");
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	g_pcap_h.nrecvers = 2;
+}
 
 static void init_hashtable(void)
 {
@@ -216,70 +280,39 @@ static struct monitior *get_node(uint32_t ip1, uint32_t ip2, uint16_t id, uint16
 	return NULL;
 }
 
-static void create_pcap_handlers(void)
+static long make_icmp_request(unsigned char *pkt, struct monitior *mon)
 {
-	int i, ret;
-	bpf_u_int32 mask = 0;
-	struct monitior mon;
-	struct bpf_program fp;
-	char filter_exp[] = "icmp [icmp-echoreply] = 0";
-	char errbuf[PCAP_ERRBUF_SIZE];
+	long timest;
+	int totlen;
+    struct icmphdr *icmp;
 
-	g_pcap_h.sendfd1 = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-	if (-1 == g_pcap_h.sendfd1)
-	{
-		fprintf(stderr, "Create Send Socket Failed.\n");
-		exit(EXIT_FAILURE);
-	}
+    icmp = (struct icmphdr *)pkt;
+    icmp->type = ICMP_ECHO;
+    icmp->code = 0;
+    icmp->un.echo.id = mon->id;
+    icmp->un.echo.sequence = mon->seq;
+    icmp->checksum = 0;
 
-	ret = setsockopt(g_pcap_h.sendfd1, SOL_SOCKET, SO_BINDTODEVICE, \
-				(const void*)master_dev, strlen(master_dev));
-	if (-1 == ret)
-	{
-		fprintf(stderr, "Bind socket to device %s failed.\n", master_dev);
-		exit(EXIT_FAILURE);
-	}
+    totlen = sizeof(struct icmphdr) + sizeof(timest) + sizeof(padding);
+	timest = timestamp();
+    memcpy(pkt + sizeof(struct icmphdr), &timest, sizeof(long));
+	memcpy(pkt + sizeof(struct icmphdr) + sizeof(long), padding, sizeof(padding));
 
-	g_pcap_h.sendfd2 = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-	if (-1 == g_pcap_h.sendfd2)
-	{
-		fprintf(stderr, "Create Send Socket Failed.\n");
-		exit(EXIT_FAILURE);
-	}
+    icmp->checksum = cal_chksum((unsigned short *)icmp, totlen);
 
-	ret = setsockopt(g_pcap_h.sendfd2, SOL_SOCKET, SO_BINDTODEVICE, \
-				(const void*)slave_dev, strlen(slave_dev));
-	if (-1 == ret)
-	{
-		fprintf(stderr, "Bind socket to device %s failed.\n", slave_dev);
-		exit(EXIT_FAILURE);
-	}
+	return timest;
+}
 
-	for (i = 0; i < 2; i++)
-	{
-		g_pcap_h.recvers[i] = pcap_open_live(mon.recvinfo[i].name, 128, 0, 0, errbuf);
-		if (!g_pcap_h.recvers[i])
-		{
-			fprintf(stderr, "%s\n", errbuf);
-			exit(EXIT_FAILURE);
-		}
+#if 0
+static int cmp_double(const void *a, const void *b)
+{
+	return (*(double*)a > *(double*)b) ? 1 : -1;
+}
+#endif
 
-		ret = pcap_compile(g_pcap_h.recvers[i], &fp, filter_exp, 0, mask);
-		if (-1 == ret)
-		{
-			pcap_perror(g_pcap_h.recvers[i], "");
-			exit(EXIT_FAILURE);
-		}
-
-		ret = pcap_setfilter(g_pcap_h.recvers[i], &fp);
-		if (-1 == ret)
-		{
-			pcap_perror(g_pcap_h.recvers[i], "");
-			exit(EXIT_FAILURE);
-		}
-	}
-
-	g_pcap_h.nrecvers = 2;
+static double sub_double(double a, double b)
+{
+	return (a > b) ? (a-b) : (b-a);
 }
 
 static int check_rtt(void *arg)
@@ -445,29 +478,6 @@ static void* recv_icmp_reply(void *args)
 	return NULL;
 }
 
-static long make_icmp_request(unsigned char *pkt, struct monitior *mon)
-{
-	long timest;
-	int totlen;
-    struct icmphdr *icmp;
-
-    icmp = (struct icmphdr *)pkt;
-    icmp->type = ICMP_ECHO;
-    icmp->code = 0;
-    icmp->un.echo.id = mon->id;
-    icmp->un.echo.sequence = mon->seq;
-    icmp->checksum = 0;
-
-    totlen = sizeof(struct icmphdr) + sizeof(timest) + sizeof(padding);
-	timest = timestamp();
-    memcpy(pkt + sizeof(struct icmphdr), &timest, sizeof(long));
-	memcpy(pkt + sizeof(struct icmphdr) + sizeof(long), padding, sizeof(padding));
-
-    icmp->checksum = cal_chksum((unsigned short *)icmp, totlen);
-
-	return timest;
-}
-
 static int send_icmp_request(void *arg)
 {
 	size_t totlen;
@@ -499,7 +509,6 @@ static int send_icmp_request(void *arg)
 
 	return 0;
 }
-
 
 static const struct cmd *match_cmd(char *opt)
 {
