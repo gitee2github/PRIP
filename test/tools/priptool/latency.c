@@ -216,6 +216,72 @@ static struct monitior *get_node(uint32_t ip1, uint32_t ip2, uint16_t id, uint16
 	return NULL;
 }
 
+static void create_pcap_handlers(void)
+{
+	int i, ret;
+	bpf_u_int32 mask = 0;
+	struct monitior mon;
+	struct bpf_program fp;
+	char filter_exp[] = "icmp [icmp-echoreply] = 0";
+	char errbuf[PCAP_ERRBUF_SIZE];
+
+	g_pcap_h.sendfd1 = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+	if (-1 == g_pcap_h.sendfd1)
+	{
+		fprintf(stderr, "Create Send Socket Failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	ret = setsockopt(g_pcap_h.sendfd1, SOL_SOCKET, SO_BINDTODEVICE, \
+				(const void*)master_dev, strlen(master_dev));
+	if (-1 == ret)
+	{
+		fprintf(stderr, "Bind socket to device %s failed.\n", master_dev);
+		exit(EXIT_FAILURE);
+	}
+
+	g_pcap_h.sendfd2 = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+	if (-1 == g_pcap_h.sendfd2)
+	{
+		fprintf(stderr, "Create Send Socket Failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	ret = setsockopt(g_pcap_h.sendfd2, SOL_SOCKET, SO_BINDTODEVICE, \
+				(const void*)slave_dev, strlen(slave_dev));
+	if (-1 == ret)
+	{
+		fprintf(stderr, "Bind socket to device %s failed.\n", slave_dev);
+		exit(EXIT_FAILURE);
+	}
+
+	for (i = 0; i < 2; i++)
+	{
+		g_pcap_h.recvers[i] = pcap_open_live(mon.recvinfo[i].name, 128, 0, 0, errbuf);
+		if (!g_pcap_h.recvers[i])
+		{
+			fprintf(stderr, "%s\n", errbuf);
+			exit(EXIT_FAILURE);
+		}
+
+		ret = pcap_compile(g_pcap_h.recvers[i], &fp, filter_exp, 0, mask);
+		if (-1 == ret)
+		{
+			pcap_perror(g_pcap_h.recvers[i], "");
+			exit(EXIT_FAILURE);
+		}
+
+		ret = pcap_setfilter(g_pcap_h.recvers[i], &fp);
+		if (-1 == ret)
+		{
+			pcap_perror(g_pcap_h.recvers[i], "");
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	g_pcap_h.nrecvers = 2;
+}
+
 static int check_rtt(void *arg)
 {
 	double rtt;
