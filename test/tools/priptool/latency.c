@@ -385,6 +385,66 @@ static int check_rtt(void *arg)
 	return 0;
 }
 
+static void pcap_callback(u_char *arg, const struct pcap_pkthdr *pkthdr, const u_char *packet)
+{
+	int pcap_i;
+	size_t totlen;
+	long timest, recvtime;
+	struct iphdr *ip;
+	struct icmphdr *icmp;
+	struct monitior *node;
+
+	pcap_i = *(int*)arg;
+	totlen = sizeof(struct icmphdr) + sizeof(long) + sizeof(padding);
+
+	if (pkthdr->caplen < sizeof(struct iphdr) + sizeof(struct ethhdr))
+	{
+		return;
+	}
+
+	ip = (struct iphdr *)(packet + sizeof(struct ethhdr));
+	if ((pkthdr->caplen - (ip->ihl * 4) - sizeof(struct ethhdr)) != totlen)
+	{
+		return;
+	}
+
+	icmp = (struct icmphdr *)((u_char *)ip + ip->ihl * 4);
+	if (icmp->type != ICMP_ECHOREPLY || icmp->code != 0)
+	{
+		return;
+	}
+
+	recvtime = pkthdr->ts.tv_sec * 1000000L + pkthdr->ts.tv_usec;
+
+	node = get_node(ip->saddr, icmp->un.echo.id, icmp->un.echo.sequence);
+	if (!node)
+		return;
+
+	pthread_mutex_lock(&node->mutex);
+	memcpy(&timest, (unsigned char *)icmp + sizeof(struct icmphdr), sizeof(timest));
+	if (timest == node->timesend && pcap_i < 2)
+	{
+		node->recvinfo[pcap_i].timerecv = recvtime;
+	}
+	pthread_mutex_unlock(&node->mutex);
+}
+
+static void* recv_icmp_reply(void *args)
+{
+	int pcap_i;
+	pcap_t *pcap_h;
+
+	pcap_i = *(int*)args;
+	pcap_h = g_pcap_h.recvers[pcap_i]; 
+
+	for (;;)
+	{
+		pcap_loop(pcap_h, 1, pcap_callback, (u_char *)&pcap_i);
+	}
+
+	return NULL;
+}
+
 static long make_icmp_request(unsigned char *pkt, struct monitior *mon)
 {
 	long timest;
