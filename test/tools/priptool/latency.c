@@ -216,6 +216,109 @@ static struct monitior *get_node(uint32_t ip1, uint32_t ip2, uint16_t id, uint16
 	return NULL;
 }
 
+static int check_rtt(void *arg)
+{
+	double rtt;
+	int n, m;
+	double rtt_diff;
+	double rtts[MAX_NSLAVE];
+	struct monitior *node;
+	struct list_head *list, *next;
+
+	for (int i = 0; i < hash_table.bucket_size; i++)
+	{
+		if (list_empty(&hash_table.hash_list[i].head))
+			continue;
+
+		list_for_each_safe(list, next, &hash_table.hash_list[i].head)
+		{
+			node = list_entry(list, struct monitior, hook);
+			if (!node)
+				continue;
+
+			/* wait timeout. */
+			if ((timestamp() - node->timesend) < (g_interval * 1000L))
+				continue;
+
+			/* calculate rtt. */
+			pthread_mutex_lock(&node->mutex);
+			for (n = 0; n < 2; n++)
+			{
+				if (node->recvinfo[n].timerecv == 0)
+				{
+					red_printf("%s no reply received", node->recvinfo[n].name);
+					rtts[n] = 0;
+					continue;
+				}
+
+				rtt = (node->recvinfo[n].timerecv - node->timesend) / (double)1000;
+				if (rtt > g_rtt)
+				{
+					red_printf("%s rtt %.3fms", node->recvinfo[n].name, rtt);
+				}
+
+				rtts[n] = rtt;
+			}
+
+			/* calculate rtt diff. */
+			for (n = 0; n < 2; n++)
+			{
+				if (rtts[n] == 0)
+					continue;
+
+				for (m = n + 1; m < 2; m++)
+				{
+					if (rtts[m] == 0)
+						continue;
+
+					rtt_diff = sub_double(rtts[n], rtts[m]);
+
+					if (rtt_diff > g_rtt_diff)
+					{
+						red_printf("%s with %s rtt diff %.3fms",  \
+											node->recvinfo[n].name, \
+											node->recvinfo[m].name, \
+											rtt_diff);
+					}
+				}
+			}
+
+#if 0
+			/* get max rtt. */
+			for (max = 0, n = 1; n < node->nslave; n++)
+			{
+				if (rtts[n] > rtts[max])
+					max = n;
+			}
+
+			/* calculate rtt_diff. */
+			for (n = 0; n < node->nslave && n < MAX_NSLAVE; n++)
+			{
+				if (n == max)
+					continue;
+				
+				rtt_diff = rtts[max] - rtts[n];
+				if (rtt_diff > g_rtt_diff)
+				{
+					red_printf("%s with %s rtt diff %.3fms", \
+								node->slaves[max].name, \
+								node->slaves[n].name, rtt_diff);
+				}
+			}
+#endif
+
+			/* delete node before unlock. */
+			list_del(&node->hook);
+
+			pthread_mutex_unlock(&node->mutex);
+
+			free(node);
+		}
+	}
+
+	return 0;
+}
+
 static long make_icmp_request(unsigned char *pkt, struct monitior *mon)
 {
 	long timest;
