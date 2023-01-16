@@ -46,6 +46,21 @@ int get_timer_fd(void)
 	return timerfd;
 }
 
+void put_timer_fd(int id)
+{
+	if (id < 0 || id >= 100)	
+	{
+		return;
+	}
+
+	if (g_timer_fd[id] == 1)
+	{
+		g_timer_fd[id] = 0;
+	}
+
+	return;
+}
+
 int create_timer(int id, int time_out, time_handler handler, void *data)
 {
 	TIMER *pstTimer = NULL;
