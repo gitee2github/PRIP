@@ -549,3 +549,26 @@ int get_timer_fd(void)
 
 ```
 
+### 7.5 返还一个不用的定时器
+
+如果id不合法，直接推出
+
+将定时器id数组以该id为下标的元素设置为0,完成返还操作
+
+```
+void put_timer_fd(int id)
+{
+    if (id < 0 || id >= 100)
+    {
+        return;
+    }
+
+    if (g_timer_fd[id] == 1)
+    {
+        g_timer_fd[id] = 0;
+    }
+
+    return;
+}
+```
+
