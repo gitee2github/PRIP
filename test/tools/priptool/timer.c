@@ -116,3 +116,36 @@ unlock:
 	return 0;
 }
 
+void timer_loop()
+{
+	struct timeval timeout;
+	struct list_head *pstlist = NULL;
+	struct list_head *pstNextlist = NULL;
+	TIMER *pstTimer = NULL;
+
+	while(1)
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000000;
+
+		select(0, NULL, NULL, NULL, &timeout);
+		pthread_mutex_lock(&timer_mutex);
+		
+		list_for_each_safe(pstlist, pstNextlist, &g_timer_list)
+		{
+			pstTimer = list_entry(pstlist, TIMER, hook);
+			if (NULL != pstTimer)
+			{
+				pstTimer->time++;
+				if (pstTimer->time >= pstTimer->time_out)
+				{
+					pstTimer->time = 0;
+					pstTimer->handler(pstTimer->data);
+				}
+			}
+		}
+
+		pthread_mutex_unlock(&timer_mutex);
+	}
+}
+
