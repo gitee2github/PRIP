@@ -524,3 +524,28 @@ void timer_loop()
 }
 ```
 
+### 7.4 获取一个可用的定时器
+
+从定时器id数组中找到第一个为0的元素，设置为0，返回该元素的下标，即为获取到的定时器id
+
+```
+int get_timer_fd(void)
+{
+    int i = 0;
+    int timerfd = -1;
+
+    for (i = 0; i < MAX_TIMER; i++)
+    {
+        if (0 == g_timer_fd[i])
+        {
+            g_timer_fd[i] = 1;
+            timerfd = i;
+            break;
+        }
+    }
+
+    return timerfd;
+}
+
+```
+
