@@ -301,3 +301,57 @@ static int send_icmp_request(void *arg)
 }
 ```
 
+### 6.2 接收icmp响应报文
+
+icmp响应报文的接收是通过libpcap中的方法进行接收的，直接调用该方法
+
+```
+static void* recv_icmp_reply(void *args)
+{
+	int pcap_i;
+	pcap_t *pcap_h;
+
+	pcap_i = *(int*)args;
+	pcap_h = g_pcap_h.recvers[pcap_i]; 
+
+	for (;;)
+	{
+		pcap_loop(pcap_h, 1, pcap_callback, (u_char *)&pcap_i);
+	}
+
+	return NULL;
+}
+```
+
+解析icmp响应报文
+
+```
+ip = (struct iphdr *)(packet + sizeof(struct ethhdr));
+```
+
+```
+icmp = (struct icmphdr *)((u_char *)ip + ip->ihl * 4);
+```
+
+通过icmp首部判断是否为回应报文
+
+```
+if (icmp->type != ICMP_ECHOREPLY || icmp->code != 0)
+	{
+		return;
+	}
+```
+
+通过ip首部匹配到对应的节点
+
+```
+node = get_node(ip->saddr, icmp->un.echo.id, icmp->un.echo.sequence);
+```
+
+计算收包时间
+
+```
+recvtime = pkthdr->ts.tv_sec * 1000000L + pkthdr->ts.tv_usec;
+```
+
+### 
