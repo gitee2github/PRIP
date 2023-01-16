@@ -216,6 +216,61 @@ static struct monitior *get_node(uint32_t ip1, uint32_t ip2, uint16_t id, uint16
 	return NULL;
 }
 
+static long make_icmp_request(unsigned char *pkt, struct monitior *mon)
+{
+	long timest;
+	int totlen;
+    struct icmphdr *icmp;
+
+    icmp = (struct icmphdr *)pkt;
+    icmp->type = ICMP_ECHO;
+    icmp->code = 0;
+    icmp->un.echo.id = mon->id;
+    icmp->un.echo.sequence = mon->seq;
+    icmp->checksum = 0;
+
+    totlen = sizeof(struct icmphdr) + sizeof(timest) + sizeof(padding);
+	timest = timestamp();
+    memcpy(pkt + sizeof(struct icmphdr), &timest, sizeof(long));
+	memcpy(pkt + sizeof(struct icmphdr) + sizeof(long), padding, sizeof(padding));
+
+    icmp->checksum = cal_chksum((unsigned short *)icmp, totlen);
+
+	return timest;
+}
+
+static int send_icmp_request(void *arg)
+{
+	size_t totlen;
+	struct monitior *node;
+	struct sockaddr_in addr;
+	unsigned char buffer[1024];
+
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+
+	totlen = sizeof(struct icmphdr) + sizeof(long) + sizeof(padding);
+
+	node = node_insert(inet_addr(master_ip), inet_addr(slave_ip));
+	if (!node)
+		return -1;
+
+	addr.sin_addr.s_addr = node->master_ip;
+
+	pthread_mutex_lock(&node->mutex);
+	node->timesend = make_icmp_request(buffer, node);
+	pthread_mutex_unlock(&node->mutex);
+
+	sendto(g_pcap_h.sendfd1, buffer, totlen, 0, (struct sockaddr*)&addr, sizeof(addr));
+
+	addr.sin_addr.s_addr - node->slave_ip;
+	sendto(g_pcap_h.sendfd2, buffer, totlen, 0, (struct sockaddr*)&addr, sizeof(addr));
+
+	g_curr_seq++;
+
+	return 0;
+}
+
 
 static const struct cmd *match_cmd(char *opt)
 {
