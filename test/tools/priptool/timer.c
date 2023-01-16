@@ -61,6 +61,39 @@ void put_timer_fd(int id)
 	return;
 }
 
+int search_timer(int id)
+{
+	struct list_head *pstlist = NULL;
+	struct list_head *pstNextlist = NULL;
+	TIMER *pstTimer = NULL;
+	int ret = 0;
+
+	if (list_empty(&g_timer_list))
+	{
+		goto unlock;
+	}
+
+	pthread_mutex_lock(&timer_mutex);
+
+	list_for_each_safe(pstlist, pstNextlist, &g_timer_list)
+	{
+		pstTimer = list_entry(pstlist, TIMER, hook);
+		if (NULL != pstTimer)
+		{
+			if (pstTimer->timer_id == id)
+			{
+				ret = 1;
+				goto unlock;
+			}	
+		}
+	}
+unlock:
+
+	pthread_mutex_unlock(&timer_mutex);
+
+	return ret;
+}
+
 int create_timer(int id, int time_out, time_handler handler, void *data)
 {
 	TIMER *pstTimer = NULL;
@@ -179,4 +212,3 @@ void timer_loop()
 		pthread_mutex_unlock(&timer_mutex);
 	}
 }
-
