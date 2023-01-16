@@ -355,3 +355,49 @@ recvtime = pkthdr->ts.tv_sec * 1000000L + pkthdr->ts.tv_usec;
 ```
 
 ### 
+
+### 6.3 判断链路是否延迟
+
+遍历哈希桶-哈希表，对每一个node进行延迟判断
+
+```
+for (int i = 0; i < hash_table.bucket_size; i++)
+{
+	list_for_each_safe(list, next, &hash_table.hash_list[i].head)
+	{
+		node = list_entry(list, struct monitior, hook);
+		。。。
+	}
+}
+```
+
+如果节点收发报文延迟时间小于定时器timer的执行间隔interval，才进行延迟差计算
+
+```
+if ((timestamp() - node->timesend) < (g_interval * 1000L))
+	continue;
+```
+
+分别计算主从链路的延迟rtt（收包时间-发包时间），如果延迟大于参数指定的值g_rtt，则进行告警
+
+```
+rtt = (node->slaves[n].timerecv - node->timesend) / (double)1000;
+if (rtt > g_rtt)
+{
+					red_printf("%s rtt %.3fms", node->slaves[n].name, rtt);
+}
+```
+
+比较主从链路之间的延迟差，如果查处参数指定值，进行告警
+
+```
+rtt_diff = sub_double(rtts[n], rtts[m]);
+if (rtt_diff > g_rtt_diff)
+{
+	red_printf("%s with %s rtt diff %.3fms",  \
+						node->slaves[n].name, \
+						node->slaves[m].name, \
+						rtt_diff);
+}
+```
+
