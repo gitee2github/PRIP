@@ -28,7 +28,23 @@ void init_timer_list()
 	return;
 }
 
+int get_timer_fd(void)
+{
+	int i = 0;
+	int timerfd = -1;
 
+	for (i = 0; i < MAX_TIMER; i++)
+	{
+		if (0 == g_timer_fd[i])
+		{
+			g_timer_fd[i] = 1;
+			timerfd = i;
+			break;
+		}
+	}
+
+	return timerfd;
+}
 
 int create_timer(int id, int time_out, time_handler handler, void *data)
 {
