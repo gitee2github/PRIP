@@ -487,3 +487,40 @@ int del_timer(int id)
     }
 ```
 
+### 7.3 定期执行定时器的操作句柄
+
+通过select指定循环遍历定时器链表的时间间隔
+
+每个定时器在经过n次遍历后，会触发自己的定时时间，然后执行定时器中的操作句柄
+
+```
+void timer_loop()
+{
+‘’‘’‘’
+    while(1)
+    {
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 1000000;
+
+        select(0, NULL, NULL, NULL, &timeout);
+        pthread_mutex_lock(&timer_mutex);
+
+        list_for_each_safe(pstlist, pstNextlist, &g_timer_list)
+        {
+            pstTimer = list_entry(pstlist, TIMER, hook);
+            if (NULL != pstTimer)
+            {
+                pstTimer->time++;
+                if (pstTimer->time >= pstTimer->time_out)
+                {
+                    pstTimer->time = 0;
+                    pstTimer->handler(pstTimer->data);
+                }
+            }
+        }
+
+        pthread_mutex_unlock(&timer_mutex);
+    }
+}
+```
+
