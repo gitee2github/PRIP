@@ -70,4 +70,49 @@ int create_timer(int id, int time_out, time_handler handler, void *data)
 	return 0;
 }
 
+int del_timer(int id)
+{
+	struct list_head *pstlist = NULL;
+	struct list_head *pstNextlist = NULL;
+	TIMER *pstTimer = NULL;
+
+	if (id < 0 || id >= 100)	
+	{
+		printf("timer id %d invalid \n", id);
+		return -1;
+	}
+
+	if (!search_timer(id))
+	{
+		printf("timer id %d not exist\n", id);
+		return -1;
+	}
+
+	if (list_empty(&g_timer_list))
+	{
+		goto unlock;
+	}
+
+	pthread_mutex_lock(&timer_mutex);
+
+	list_for_each_safe(pstlist, pstNextlist, &g_timer_list)
+	{
+		pstTimer = list_entry(pstlist, TIMER, hook);
+		if (NULL != pstTimer)
+		{
+			if (pstTimer->timer_id == id)
+			{
+				list_del(&pstTimer->hook);
+				put_timer_fd(pstTimer->timer_id);
+				free(pstTimer);
+				goto unlock;
+			}	
+		}
+	}
+unlock:
+
+	pthread_mutex_lock(&timer_mutex);
+
+	return 0;
+}
 
