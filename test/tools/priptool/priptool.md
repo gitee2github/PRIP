@@ -572,3 +572,35 @@ void put_timer_fd(int id)
 }
 ```
 
+
+
+7.6 根据定时器id查找对应的定时器
+
+首先判断定时器链表是否为空
+
+如果非空，依次从定时器链表中取出定时器节点，判断节点中的定时器id是否和入参id匹配，如果匹配，则查找成功，返回1 ，如果遍历链表结束也没匹配到id， 则查找失败，返回0
+
+```
+int search_timer(int id)
+{
+。。。。。
+	if (list_empty(&g_timer_list))
+	{
+		goto unlock;
+	}
+
+	list_for_each_safe(pstlist, pstNextlist, &g_timer_list)
+	{
+		pstTimer = list_entry(pstlist, TIMER, hook);
+		if (NULL != pstTimer)
+		{
+			if (pstTimer->timer_id == id)
+			{
+				ret = 1;
+				goto unlock;
+			}	
+		}
+	}
+}
+```
+
