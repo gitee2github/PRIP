@@ -209,3 +209,95 @@ static void show_state(void)
 }
 ```
 
+
+
+## 6 链路延迟告警功能
+
+创建两个定时器，一个用于定期向主从链路发送icmp请求报文，记录发送报文的时间戳，另一个定时器定期检查每条链路收到icmp响应报文的延迟时间，并且比较他们之间的延迟差，如果超出入参指定阈值，则进行告警
+
+创建两个线程，用于分别在两条链路上接收icmp响应报文，记录收到报文的时间戳。
+
+源码文件： latency.c latency.h timer.c timer.h jhash.c jhash.h 
+
+
+
+### 6.1 发送icmp请求报文
+
+创建原始套接字，组织icmp请求报文，计算校验和，通过sendto发送给指定ip地址
+
+-  创建socket文件描述符
+
+  ```
+  	g_pcap_h.sendfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+  	if (-1 == g_pcap_h.sendfd)
+  	{
+  		fprintf(stderr, "Create Send Socket Failed.\n");
+  		exit(EXIT_FAILURE);
+  	}
+  
+  	ret = setsockopt(g_pcap_h.sendfd, SOL_SOCKET, SO_BINDTODEVICE, \
+  				(const void*)bondname, strlen(bondname));
+  ```
+
+- 生成icmp请求报文
+
+```
+static long make_icmp_request(unsigned char *pkt, struct monitior *mon)
+{
+	long timest;
+	int totlen;
+    struct icmphdr *icmp;
+
+    icmp = (struct icmphdr *)pkt;
+    icmp->type = ICMP_ECHO;
+    icmp->code = 0;
+    icmp->un.echo.id = mon->id;
+    icmp->un.echo.sequence = mon->seq;
+    icmp->checksum = 0;
+
+    totlen = sizeof(struct icmphdr) + sizeof(timest) + sizeof(padding);
+	timest = timestamp();
+    memcpy(pkt + sizeof(struct icmphdr), &timest, sizeof(long));
+	memcpy(pkt + sizeof(struct icmphdr) + sizeof(long), padding, sizeof(padding));
+
+    icmp->checksum = cal_chksum((unsigned short *)icmp, totlen);
+
+	return timest;
+}
+```
+
+
+
+- 发送icmp请求报文
+
+```
+static int send_icmp_request(void *arg)
+{
+	size_t totlen;
+	struct monitior *node;
+	struct sockaddr_in addr;
+	unsigned char buffer[1024];
+
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+
+	totlen = sizeof(struct icmphdr) + sizeof(long) + sizeof(padding);
+
+	node = node_insert(inet_addr(g_ipaddr));
+	if (!node)
+		return -1;
+
+	addr.sin_addr.s_addr = node->ipaddr;
+
+	pthread_mutex_lock(&node->mutex);
+	node->timesend = make_icmp_request(buffer, node);
+	pthread_mutex_unlock(&node->mutex);
+
+	sendto(g_pcap_h.sendfd, buffer, totlen, 0, (struct sockaddr*)&addr, sizeof(addr));
+
+	g_curr_seq++;
+
+	return 0;
+}
+```
+
