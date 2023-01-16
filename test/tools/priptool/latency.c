@@ -230,7 +230,103 @@ static const struct cmd *match_cmd(char *opt)
 	return NULL;
 }
 
+static void set_dev(char *argv)
+{
+	if (0 == if_nametoindex(argv[0]))
+	{
+		fprintf(stderr, "Device %s not exist.\n", argv[0]);
+		exit(EXIT_FAILURE);
+	}
 
+	if (0 == if_nametoindex(argv[1]))
+	{
+		fprintf(stderr, "Device %s not exist.\n", argv[1]);
+		exit(EXIT_FAILURE);
+	}
+
+	master_dev = argv[0];
+	slave_dev = argv[1];
+}
+
+static void set_ip(char *argv)
+{
+	unsigned char buf[sizeof(struct in_addr)];
+
+	if (1 != inet_pton(AF_INET, argv[0], buf))
+	{
+		fprintf(stderr, "Invalid ip address : %s\n", argv[0]);
+		exit(EXIT_FAILURE);
+	}
+
+	if (1 != inet_pton(AF_INET, argv[1], buf))
+	{
+		fprintf(stderr, "Invalid ip address : %s\n", argv[1]);
+		exit(EXIT_FAILURE);
+	}
+
+	master_ip = argv[0]; 
+	slave_ip = argv[1];
+}
+
+static void set_interval(char *argv)
+{
+	g_interval = atoi(argv);
+}
+
+static void set_rtt(char *argv)
+{
+	g_rtt = atoi(argv);
+}
+
+static void set_rtt_diff(char *argv)
+{
+	g_rtt_diff = atoi(argv);	
+}
+
+static void check_arguments(void)
+{
+	if (g_rtt < 0 || g_rtt_diff < 0 || g_interval < 0)
+	{
+		fprintf(stderr, "\"rtt\" \"rtt_diff\" \"interval\" must great than 0\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (g_rtt > g_interval * 1000L || g_rtt_diff > g_interval * 1000L)
+	{
+		fprintf(stderr, "\"rtt\" or \"rtt_diff\" must less than \"interval\"\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (!g_ipaddr)
+	{
+		fprintf(stderr, "using option \"ip\" to set ip address.\n");
+		exit(EXIT_FAILURE);
+	}
+}
+
+static void parse_argument(int argc, char **argv)
+{
+	char *opt, *arg;
+	const struct cmd *c;
+
+	while ((opt = get_argument(argc, argv)))
+	{
+		c = match_cmd(opt);
+		if (!c)
+		{
+			fprintf(stderr, "Invalid Option \"%s\".\n", opt);
+			exit(EXIT_FAILURE);
+		}
+
+		if (!(arg = get_argument(argc, argv)))
+		{
+			fprintf(stderr, "Option \"%s\" need an argument.\n", opt);
+			exit(EXIT_FAILURE);
+		}
+
+		c->func(arg);
+	}
+}
 
 int do_latency(int argc, char **argv)
 {
