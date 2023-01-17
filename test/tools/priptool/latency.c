@@ -92,7 +92,7 @@ static long g_rtt_diff = 1;
 static uint16_t g_curr_seq = 0;
 static struct pcap_handlers g_pcap_h; 
 static struct hashtable hash_table;
-static char padding[] = "priptool";
+static char padding[] = "priptool Author:gwang Date:2023-01-17";
 
 static long timestamp(void)
 {
@@ -149,11 +149,11 @@ static void red_printf(const char *__format, ...)
 static void create_pcap_handlers(void)
 {
 	int i, ret;
-	bpf_u_int32 mask = 0;
+	//bpf_u_int32 mask = 0;
 	struct monitior mon;
 	strcpy(mon.recvinfo[0].name, master_dev);
 	strcpy(mon.recvinfo[1].name, slave_dev);
-	struct bpf_program fp;
+	//struct bpf_program fp;
 	// char filter_exp[] = "icmp [icmp-echoreply] = 0";
 	char errbuf[PCAP_ERRBUF_SIZE];
 
@@ -280,11 +280,12 @@ static long make_icmp_request(unsigned char *pkt, struct monitior *mon)
     icmp->un.echo.id = mon->id;
     icmp->un.echo.sequence = mon->seq;
     icmp->checksum = 0;
+	
 
     totlen = sizeof(struct icmphdr) + sizeof(timest) + sizeof(padding);
 	timest = timestamp();
     memcpy(pkt + sizeof(struct icmphdr), &timest, sizeof(long));
-	memcpy(pkt + sizeof(struct icmphdr) + sizeof(long), padding, sizeof(padding));
+	memcpy(pkt + sizeof(struct icmphdr) + sizeof(long), padding, strlen(padding));
 
     icmp->checksum = cal_chksum((unsigned short *)icmp, totlen);
 
@@ -419,15 +420,13 @@ static void pcap_callback(u_char *arg, const struct pcap_pkthdr *pkthdr, const u
 	totlen = sizeof(struct icmphdr) + sizeof(long) + sizeof(padding);
 
 	if (pkthdr->caplen < sizeof(struct iphdr) + sizeof(struct ethhdr))
-	{
 		return;
-	}
 
 	ip = (struct iphdr *)(packet + sizeof(struct ethhdr));
 	if ((pkthdr->caplen - (ip->ihl * 4) - sizeof(struct ethhdr)) != totlen)
 	{
 		return;
-	}
+	} 
 
 	icmp = (struct icmphdr *)((u_char *)ip + ip->ihl * 4);
 	if (icmp->type != ICMP_ECHOREPLY || icmp->code != 0)
@@ -437,9 +436,22 @@ static void pcap_callback(u_char *arg, const struct pcap_pkthdr *pkthdr, const u
 
 	recvtime = pkthdr->ts.tv_sec * 1000000L + pkthdr->ts.tv_usec;
 
-	node = get_node(ip->saddr, icmp->un.echo.id, icmp->un.echo.sequence);
-	if (!node)
+	if(ip->saddr != inet_addr(master_ip) && ip->saddr != inet_addr(slave_ip))
+	{	
+		red_printf("cannot match this icmp reply\n");
 		return;
+	}
+
+	node = get_node(inet_addr(master_ip), icmp->un.echo.id, icmp->un.echo.sequence);
+	if (!node) 
+	{
+		node = get_node(inet_addr(slave_ip), icmp->un.echo.id, icmp->un.echo.sequence);
+		if (!node) 
+		{
+			red_printf("cannot match this icmp reply\n");
+			return;
+		}
+	}
 
 	pthread_mutex_lock(&node->mutex);
 	memcpy(&timest, (unsigned char *)icmp + sizeof(struct icmphdr), sizeof(timest));
@@ -468,13 +480,13 @@ static void* recv_icmp_reply(void *args)
 
 static int send_icmp_request(void *arg)
 {
-	printf("send icmp request\n");
 	size_t totlen;
 	struct monitior *node;
 	struct sockaddr_in addr;
 	unsigned char buffer[1024];
 
 	memset(&addr, 0, sizeof(addr));
+	memset(buffer, 0, sizeof(buffer));
 
 	totlen = sizeof(struct icmphdr) + sizeof(long) + sizeof(padding);
 
@@ -482,8 +494,6 @@ static int send_icmp_request(void *arg)
 	if (!node)
 		return -1;
 	
-	printf("%s %s\n", master_ip, slave_ip);
-
 	pthread_mutex_lock(&node->mutex);
 	node->timesend = make_icmp_request(buffer, node);
 	pthread_mutex_unlock(&node->mutex);
@@ -491,11 +501,9 @@ static int send_icmp_request(void *arg)
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = node->master_ip;
 	sendto(g_pcap_h.sendfd1, buffer, totlen, 0, (struct sockaddr*)&addr, sizeof(addr));
-	perror("master:");
 
 	addr.sin_addr.s_addr = node->slave_ip;
 	sendto(g_pcap_h.sendfd2, buffer, totlen, 0, (struct sockaddr*)&addr, sizeof(addr));
-	perror("slave:");
 
 	g_curr_seq++;
 
@@ -536,7 +544,6 @@ static void set_dev(char *argv)
 	master_dev = argv1;
 	slave_dev = argv2;
 
-	printf("set dev over\n");
 }
 
 static void set_ip(char *argv)
@@ -638,9 +645,6 @@ int do_latency(int argc, char **argv)
 	/* hash table. */
 	init_hashtable();
 
-	printf("master_ip = %s, slave_ip = %s\n", master_ip, slave_ip);
-	printf("master_dev = %s, slave_dev = %s\n", master_dev, slave_dev);
-	
 	/* create send socket and receive pcap handler. */
 	create_pcap_handlers();
 
@@ -652,8 +656,8 @@ int do_latency(int argc, char **argv)
 	/* receive packet thread, one interface one thread. */
 	for (i = 0; i < 2; i++)
 	{
-//		pthread_create(&thread_t, NULL, recv_icmp_reply, (void*)&recv_index[i]);
-//		pthread_detach(thread_t);
+		pthread_create(&thread_t, NULL, recv_icmp_reply, (void*)&recv_index[i]);
+		pthread_detach(thread_t);
 	}
 
 	/* start timer. */
