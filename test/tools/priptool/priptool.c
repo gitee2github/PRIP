@@ -6,6 +6,7 @@
 #include "show.h"
 #include "list.h"
 #include "utils.h"
+#include "latency.h"
 
 #define IFNAME_MAX 16
 
@@ -93,9 +94,9 @@ static int usage(char *cmd)
 					"\tset\t[dev]\t[eth1 192.168.122.80 24]\n"
 					"\tset\t[prip]\t[192.168.10.10 192.168.11.10 24]\n"
 					"\tset\t[alarm]\t[100]\n"
-					"\tshow\t[alarm]\n",
-					"\tlatency\t[ip 192.168.10.10 192.168.10.11] [dev eth1 eth2][interval 1] [rtt 1] [rtt_diff 1]\n"
-			cmd);
+					"\tshow\t[alarm]\n"
+					"\tlatency\t[ip 192.168.10.11,192.168.11.11] [dev eth1,eth2] [interval 1] [rtt 1] [rtt_diff 1]\n"
+			,cmd);
 
 	return 0;
 }

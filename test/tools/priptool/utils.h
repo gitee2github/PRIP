@@ -2,6 +2,7 @@
 #ifndef _UTILS_H_
 #define _UTILS_H_
 
+#define PRIP_FILE_MAX 6
 #define MAX_NET_QUEUE_NUM 64 
 
 #define SOCKET_BUF 536870912L
@@ -16,6 +17,18 @@
 #define TCP_SOCKET_BUF_MIN      314572800L
 #define TCP_SOCKET_BUF_DEFAULT  536870912L
 #define TCP_SOCKET_BUF_MAX      838860800L
+
+#define curr_argument(argc, argv) ({ \
+	(argc > 0) ? (*argv) : (NULL);  \
+})
+
+#define get_argument(argc, argv) ({ \
+	(argc > 0) ? (--argc, *argv++) : (NULL); \
+})
+
+#define next_argument(argc, argv) ({ \
+	(argc > 1) ? (argc-=2, ++argv, *argv++) : (NULL);  \
+})
 
 #define PATH_PRIP_CONFIG "/proc/prip/prip_config"
 #define PATH_PRIP_ALARM "/proc/prip/prip_alarm"

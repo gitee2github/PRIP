@@ -37,7 +37,7 @@ static const struct cmd
 	void (*func)(char *argv);
 } cmds[] = {
 	{ "ip", set_ip },
-	{ "dev", set_dev}
+	{ "dev", set_dev },
 	{ "interval", set_interval },
 	{ "rtt", set_rtt },
 	{ "rtt_diff", set_rtt_diff },
@@ -48,6 +48,7 @@ struct pcap_handlers
 {
 	int sendfd1;
 	int sendfd2;
+	int nrecvers;
 	pcap_t *recvers[2];	
 };
 
@@ -150,8 +151,10 @@ static void create_pcap_handlers(void)
 	int i, ret;
 	bpf_u_int32 mask = 0;
 	struct monitior mon;
+	strcpy(mon.recvinfo[0].name, master_dev);
+	strcpy(mon.recvinfo[1].name, slave_dev);
 	struct bpf_program fp;
-	char filter_exp[] = "icmp [icmp-echoreply] = 0";
+	// char filter_exp[] = "icmp [icmp-echoreply] = 0";
 	char errbuf[PCAP_ERRBUF_SIZE];
 
 	g_pcap_h.sendfd1 = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
@@ -190,20 +193,6 @@ static void create_pcap_handlers(void)
 		if (!g_pcap_h.recvers[i])
 		{
 			fprintf(stderr, "%s\n", errbuf);
-			exit(EXIT_FAILURE);
-		}
-
-		ret = pcap_compile(g_pcap_h.recvers[i], &fp, filter_exp, 0, mask);
-		if (-1 == ret)
-		{
-			pcap_perror(g_pcap_h.recvers[i], "");
-			exit(EXIT_FAILURE);
-		}
-
-		ret = pcap_setfilter(g_pcap_h.recvers[i], &fp);
-		if (-1 == ret)
-		{
-			pcap_perror(g_pcap_h.recvers[i], "");
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -245,9 +234,8 @@ static struct monitior *node_insert(uint32_t ipaddr1, uint32_t ipaddr2)
 	node->slave_ip = ipaddr2;
 	node->id  = getpid();
 	node->seq = g_curr_seq;
-	node->nslave = 2;
 
-	hash = icmp_hashfn(ipaddr1, ipaddr2, node->id, node->seq);
+	hash = icmp_hashfn(node->master_ip, node->id, node->seq);
 
 	list_add_tail(&node->hook, &hash_table.hash_list[hash].head);
 
@@ -256,13 +244,13 @@ static struct monitior *node_insert(uint32_t ipaddr1, uint32_t ipaddr2)
 	return node;
 }
 
-static struct monitior *get_node(uint32_t ip1, uint32_t ip2, uint16_t id, uint16_t seq)
+static struct monitior *get_node(uint32_t ip1, uint16_t id, uint16_t seq)
 {
 	uint32_t hash;
 	struct monitior *node;
 	struct list_head *list, *next;
 
-	hash = icmp_hashfn(ip1, ip2, id, seq);
+	hash = icmp_hashfn(ip1, id, seq);
 
 	list_for_each_safe(list, next, &hash_table.hash_list[hash].head)
 	{
@@ -270,7 +258,7 @@ static struct monitior *get_node(uint32_t ip1, uint32_t ip2, uint16_t id, uint16
 		if (!node)
 			continue;
 
-		if (node && node->master_ip == ip1 && node->slave_ip == ip2 &&
+		if (node && node->master_ip == ip1  &&
 			id == node->id && seq == node->seq)
 		{
 			return node;
@@ -320,7 +308,7 @@ static int check_rtt(void *arg)
 	double rtt;
 	int n, m;
 	double rtt_diff;
-	double rtts[MAX_NSLAVE];
+	double rtts[2];
 	struct monitior *node;
 	struct list_head *list, *next;
 
@@ -403,7 +391,7 @@ static int check_rtt(void *arg)
 								node->slaves[max].name, \
 								node->slaves[n].name, rtt_diff);
 				}
-			}
+			
 #endif
 
 			/* delete node before unlock. */
@@ -480,30 +468,34 @@ static void* recv_icmp_reply(void *args)
 
 static int send_icmp_request(void *arg)
 {
+	printf("send icmp request\n");
 	size_t totlen;
 	struct monitior *node;
 	struct sockaddr_in addr;
 	unsigned char buffer[1024];
 
 	memset(&addr, 0, sizeof(addr));
-	addr.sin_family = AF_INET;
 
 	totlen = sizeof(struct icmphdr) + sizeof(long) + sizeof(padding);
 
 	node = node_insert(inet_addr(master_ip), inet_addr(slave_ip));
 	if (!node)
 		return -1;
-
-	addr.sin_addr.s_addr = node->master_ip;
+	
+	printf("%s %s\n", master_ip, slave_ip);
 
 	pthread_mutex_lock(&node->mutex);
 	node->timesend = make_icmp_request(buffer, node);
 	pthread_mutex_unlock(&node->mutex);
 
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = node->master_ip;
 	sendto(g_pcap_h.sendfd1, buffer, totlen, 0, (struct sockaddr*)&addr, sizeof(addr));
+	perror("master:");
 
-	addr.sin_addr.s_addr - node->slave_ip;
+	addr.sin_addr.s_addr = node->slave_ip;
 	sendto(g_pcap_h.sendfd2, buffer, totlen, 0, (struct sockaddr*)&addr, sizeof(addr));
+	perror("slave:");
 
 	g_curr_seq++;
 
@@ -525,40 +517,50 @@ static const struct cmd *match_cmd(char *opt)
 
 static void set_dev(char *argv)
 {
-	if (0 == if_nametoindex(argv[0]))
+	char *argv1 = NULL;
+	char *argv2 = NULL;
+	argv1 = strtok(argv, ",");
+	if (0 == if_nametoindex(argv1))
 	{
-		fprintf(stderr, "Device %s not exist.\n", argv[0]);
+		fprintf(stderr, "Device %s not exist.\n", argv1);
 		exit(EXIT_FAILURE);
 	}
 
-	if (0 == if_nametoindex(argv[1]))
+	argv2 = strtok(NULL, ",");
+	if (0 == if_nametoindex(argv2))
 	{
-		fprintf(stderr, "Device %s not exist.\n", argv[1]);
+		fprintf(stderr, "Device %s not exist.\n", argv2);
 		exit(EXIT_FAILURE);
 	}
 
-	master_dev = argv[0];
-	slave_dev = argv[1];
+	master_dev = argv1;
+	slave_dev = argv2;
+
+	printf("set dev over\n");
 }
 
 static void set_ip(char *argv)
 {
+	char *argv1 = NULL;
+	char *argv2 = NULL;
 	unsigned char buf[sizeof(struct in_addr)];
 
-	if (1 != inet_pton(AF_INET, argv[0], buf))
+	argv1 = strtok(argv, ",");
+	if (1 != inet_pton(AF_INET, argv1, buf))
 	{
-		fprintf(stderr, "Invalid ip address : %s\n", argv[0]);
+		fprintf(stderr, "Invalid ip address : %s\n", argv1);
 		exit(EXIT_FAILURE);
 	}
 
-	if (1 != inet_pton(AF_INET, argv[1], buf))
+	argv2 = strtok(NULL, ",");
+	if (1 != inet_pton(AF_INET, argv2, buf))
 	{
-		fprintf(stderr, "Invalid ip address : %s\n", argv[1]);
+		fprintf(stderr, "Invalid ip address : %s\n", argv2);
 		exit(EXIT_FAILURE);
 	}
 
-	master_ip = argv[0]; 
-	slave_ip = argv[1];
+	master_ip = argv1; 
+	slave_ip = argv2;
 }
 
 static void set_interval(char *argv)
@@ -590,7 +592,7 @@ static void check_arguments(void)
 		exit(EXIT_FAILURE);
 	}
 
-	if (!g_ipaddr)
+	if (!master_ip && !slave_ip)
 	{
 		fprintf(stderr, "using option \"ip\" to set ip address.\n");
 		exit(EXIT_FAILURE);
@@ -636,6 +638,9 @@ int do_latency(int argc, char **argv)
 	/* hash table. */
 	init_hashtable();
 
+	printf("master_ip = %s, slave_ip = %s\n", master_ip, slave_ip);
+	printf("master_dev = %s, slave_dev = %s\n", master_dev, slave_dev);
+	
 	/* create send socket and receive pcap handler. */
 	create_pcap_handlers();
 
@@ -647,8 +652,8 @@ int do_latency(int argc, char **argv)
 	/* receive packet thread, one interface one thread. */
 	for (i = 0; i < 2; i++)
 	{
-		pthread_create(&thread_t, NULL, recv_icmp_reply, (void*)&recv_index[i]);
-		pthread_detach(thread_t);
+//		pthread_create(&thread_t, NULL, recv_icmp_reply, (void*)&recv_index[i]);
+//		pthread_detach(thread_t);
 	}
 
 	/* start timer. */
