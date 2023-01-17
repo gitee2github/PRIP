@@ -6,7 +6,7 @@
 #define HASHSZ 1024
 #define JHASH_INITVAL 0xdeadbeef
 
-uint32_t icmp_hashfn(uint32_t ip1, uint32_t ip2, uint32_t type, uint32_t code);
+uint32_t icmp_hashfn(uint32_t ip1, uint32_t type, uint32_t code);
 
 static inline uint32_t rol32(uint32_t word, unsigned int shift)
 {

@@ -8,7 +8,7 @@
 #include "list.h"
 #include "jhash.h"
 
-uint32_t icmp_hashfn(uint32_t ip1, uint32_t ip2, uint32_t type, uint32_t code)
+uint32_t icmp_hashfn(uint32_t ip1, uint32_t type, uint32_t code)
 {
-	return jhash_3words(ip1, ip2, type, code) & (HASHSZ - 1);
+	return jhash_3words(ip1, type, code, 0) & (HASHSZ - 1);
 }

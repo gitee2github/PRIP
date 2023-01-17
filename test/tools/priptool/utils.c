@@ -8,13 +8,6 @@
 
 #include "utils.h"
 
-static const char *names[PRIP_FILE_MAX] = {
-	[PRIP_CONFIG] = "/proc/prip/prip_config",
-	[PRIP_ALARM] = "/proc/prip/prip_alarm",
-	[PRIP_TIMEOUT] = "/proc/prip/prip_cache_timeout",
-	[PRIP_STATE] = "/proc/prip/prip_state",
-	[PRIP_SET] = "/proc/sys/net/ipv4/prip_set",
-};
 
 void exec_config_cmd(char *cmd, char *str, int flag)
 {
